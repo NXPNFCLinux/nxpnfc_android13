@@ -1,0 +1,5 @@
+# allow NFC process to call into the NFC HAL
+allow nfc nfc_data_file:dir create_dir_perms;
+allow nfc nxpnfc_hwservice:hwservice_manager find;
+allow nfc nfc_vendor_data_file:dir { create_dir_perms add_name search read write create remove_name };
+allow nfc nfc_vendor_data_file:file create_file_perms;

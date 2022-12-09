@@ -1,0 +1,31 @@
+diff --git a/fs_mgr/fs_mgr_remount.cpp b/fs_mgr/fs_mgr_remount.cpp
+index e685070a8..745dab24c 100644
+--- a/fs_mgr/fs_mgr_remount.cpp
++++ b/fs_mgr/fs_mgr_remount.cpp
+@@ -411,26 +411,19 @@ static int do_remount(int argc, char* argv[]) {
+         auto blk_device = entry.blk_device;
+         auto mount_point = entry.mount_point;
+ 
+-        auto found = false;
+         for (auto it = mounts.rbegin(); it != mounts.rend(); ++it) {
+             auto& rentry = *it;
+             if (mount_point == rentry.mount_point) {
+                 blk_device = rentry.blk_device;
+-                found = true;
+                 break;
+             }
+             // Find overlayfs mount point?
+             if ((mount_point == "/") && (rentry.mount_point == "/system")) {
+                 blk_device = rentry.blk_device;
+                 mount_point = "/system";
+-                found = true;
+                 break;
+             }
+         }
+-        if (!found) {
+-            PLOG(INFO) << "skip unmounted partition dev:" << blk_device << " mnt:" << mount_point;
+-            continue;
+-        }
+         if (blk_device == "/dev/root") {
+             auto from_fstab = GetEntryForMountPoint(&fstab, mount_point);
+             if (from_fstab) blk_device = from_fstab->blk_device;

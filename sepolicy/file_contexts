@@ -1,0 +1,4 @@
+# NFC labeling
+/dev/nxpnfc             u:object_r:nfc_device:s0
+/data/nfc(/.*)?        u:object_r:nfc_data_file:s0
+/data/vendor/nfc(/.*)? u:object_r:nfc_vendor_data_file:s0

@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    >
+
+    <LinearLayout
+        android:layout_width="500dip"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal|clip_horizontal"
+        android:orientation="vertical" >
+
+        <TextView
+            android:layout_marginLeft="10dp"
+            android:layout_marginBottom="10dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Status:"
+            android:textSize="16sp"
+            android:layout_gravity="left" />
+
+        <TextView
+            android:id="@+id/txt_status"
+            android:layout_marginLeft="10dp"
+            android:layout_marginBottom="10dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="16sp"
+            android:layout_gravity="left" />
+
+
+        <TextView
+            android:layout_marginLeft="10dp"
+            android:layout_marginBottom="10dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Note: This demo app only supports RTD_TXT type"
+            android:textSize="12sp"
+            android:layout_gravity="left" />
+
+         <EditText
+            android:id="@+id/edt_content"
+            android:layout_marginLeft="10dp"
+            android:layout_marginBottom="10dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@android:color/darker_gray"
+            android:textColor="@android:color/black"
+            android:inputType="textMultiLine"
+            android:lines="8"
+            android:minLines="6"
+            android:gravity="top|left"
+            android:maxLines="10"
+            android:hint="Please enter text to write" />
+
+
+        <LinearLayout
+            android:layout_marginLeft="10dp"
+            android:layout_marginBottom="10dp"
+            android:layout_width="300dip"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal" >
+
+            <Button
+                android:id="@+id/btn_write"
+                android:layout_width="100dip"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical|center_horizontal"
+                android:text="T4T Write" />
+
+            <Button
+                android:id="@+id/btn_read"
+                android:layout_width="100dip"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical|center_horizontal"
+                android:text="T4T Read" />
+
+            <Button
+                android:id="@+id/btn_reset"
+                android:layout_width="100dip"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical|center_horizontal"
+                android:text="reset" />
+
+            </LinearLayout>
+
+    </LinearLayout>
+
+
+    <ImageView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginRight="10dp"
+        android:layout_marginBottom="10dp"
+        android:src="@drawable/nxp_logo"
+        android:layout_gravity="bottom|right"
+        />
+
+</FrameLayout>

@@ -1,0 +1,40 @@
+diff --git a/core/java/android/nfc/INfcAdapter.aidl b/core/java/android/nfc/INfcAdapter.aidl
+index cb9a3e43db81..3a77e7e24671 100644
+--- a/core/java/android/nfc/INfcAdapter.aidl
++++ b/core/java/android/nfc/INfcAdapter.aidl
+@@ -13,6 +13,26 @@
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
++ /******************************************************************************
++  *
++  *  The original Work has been changed by NXP.
++  *
++  *  Copyright 2015-2021 NXP
++  *
++  *  Licensed under the Apache License, Version 2.0 (the "License");
++  *  you may not use this file except in compliance with the License.
++  *  You may obtain a copy of the License at
++  *
++  *  http://www.apache.org/licenses/LICENSE-2.0
++  *
++  *  Unless required by applicable law or agreed to in writing, software
++  *  distributed under the License is distributed on an "AS IS" BASIS,
++  *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++  *  See the License for the specific language governing permissions and
++  *  limitations under the License.
++  *
++ ******************************************************************************/
++
+ 
+ package android.nfc;
+ 
+@@ -43,6 +63,8 @@ interface INfcAdapter
+     INfcFCardEmulation getNfcFCardEmulationInterface();
+     INfcAdapterExtras getNfcAdapterExtrasInterface(in String pkg);
+     INfcDta getNfcDtaInterface(in String pkg);
++    IBinder getNfcAdapterVendorInterface(in String vendor);
++
+     int getState();
+     boolean disable(boolean saveState);
+     boolean enable();

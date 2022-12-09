@@ -1,0 +1,21 @@
+diff --git a/compatibility_matrices/compatibility_matrix.current.xml b/compatibility_matrices/compatibility_matrix.current.xml
+index 8b6e8414d..dbdb21d57 100644
+--- a/compatibility_matrices/compatibility_matrix.current.xml
++++ b/compatibility_matrices/compatibility_matrix.current.xml
+@@ -7,6 +7,16 @@
+             <instance>default</instance>
+         </interface>
+     </hal>
++    <hal format="hidl">
++        <name>vendor.nxp.nxpnfc</name>
++        <transport>hwbinder</transport>
++        <impl level="generic"></impl>
++        <version>1.0</version>
++        <interface>
++            <name>INxpNfc</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
+     <hal format="hidl" optional="false">
+         <name>android.hardware.audio</name>
+         <version>6.0</version>
