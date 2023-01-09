@@ -1,0 +1,33 @@
+diff --git a/core/main.mk b/core/main.mk
+index c10a3cc..a281c50 100644
+--- a/core/main.mk
++++ b/core/main.mk
+@@ -745,17 +745,17 @@ ifneq (,$(filter $(HOST_OS),darwin))
+   check_missing_required_modules :=
+ endif # HOST_OS == darwin
+ 
+-ifeq (true,$(check_missing_required_modules))
+-ifneq (,$(_nonexistent_required))
+-  $(warning Missing required dependencies:)
+-  $(foreach r_i,$(_nonexistent_required), \
+-    $(eval r := $(subst $(comma),$(space),$(r_i))) \
+-    $(info $(word 1,$(r)) module $(word 2,$(r)) requires non-existent $(word 3,$(r)) module: $(word 4,$(r))) \
+-  )
+-  $(warning Set BUILD_BROKEN_MISSING_REQUIRED_MODULES := true to bypass this check if this is intentional)
+-  $(error Build failed)
+-endif # _nonexistent_required != empty
+-endif # check_missing_required_modules == true
++# ifeq (true,$(check_missing_required_modules))
++# ifneq (,$(_nonexistent_required))
++#   $(warning Missing required dependencies:)
++#   $(foreach r_i,$(_nonexistent_required), \
++#     $(eval r := $(subst $(comma),$(space),$(r_i))) \
++#     $(info $(word 1,$(r)) module $(word 2,$(r)) requires non-existent $(word 3,$(r)) module: $(word 4,$(r))) \
++#   )
++#   $(warning Set BUILD_BROKEN_MISSING_REQUIRED_MODULES := true to bypass this check if this is intentional)
++#   $(error Build failed)
++# endif # _nonexistent_required != empty
++# endif # check_missing_required_modules == true
+ 
+ define add-required-deps
+ $(1): | $(2)

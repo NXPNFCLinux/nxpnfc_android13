@@ -1,0 +1,38 @@
+diff --git a/compatibility_matrices/compatibility_matrix.6.xml b/compatibility_matrices/compatibility_matrix.6.xml
+index e19d2dd12..ec22e2736 100644
+--- a/compatibility_matrices/compatibility_matrix.6.xml
++++ b/compatibility_matrices/compatibility_matrix.6.xml
+@@ -7,6 +7,14 @@
+             <instance>default</instance>
+         </interface>
+     </hal>
++    <hal format="hidl">
++        <name>vendor.nxp.nxpnfc</name>
++        <version>1.0</version>
++        <interface>
++            <name>INxpNfc</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
+     <hal format="hidl" optional="false">
+         <name>android.hardware.audio</name>
+         <version>6.0</version>
+diff --git a/compatibility_matrices/compatibility_matrix.current.xml b/compatibility_matrices/compatibility_matrix.current.xml
+index 886f7f5b3..91b894c64 100644
+--- a/compatibility_matrices/compatibility_matrix.current.xml
++++ b/compatibility_matrices/compatibility_matrix.current.xml
+@@ -7,6 +7,14 @@
+             <instance>default</instance>
+         </interface>
+     </hal>
++    <hal format="hidl" optional="true">
++        <name>vendor.nxp.nxpnfc</name>
++        <version>1.0</version>
++        <interface>
++            <name>INxpNfc</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
+     <hal format="hidl" optional="false">
+         <name>android.hardware.audio</name>
+         <version>6.0</version>

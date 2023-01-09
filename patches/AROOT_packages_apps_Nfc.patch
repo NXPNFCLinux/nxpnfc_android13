@@ -1,0 +1,3475 @@
+diff --git a/Android.bp b/Android.bp
+index 21c15aad..5b0df26f 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -18,9 +18,11 @@ android_app {
+         "nci/**/*.java",
+         ":statslog-Nfc-java-gen",
+     ],
++    uses_libs: ["com.nxp.nfc"],
+     platform_apis: true,
+     certificate: "platform",
+     jni_libs: ["libnfc_nci_jni"],
++    libs: ["com.nxp.nfc"],
+     static_libs: [
+         "androidx.appcompat_appcompat",
+         "com.google.android.material_material",
+diff --git a/AndroidManifest.xml b/AndroidManifest.xml
+index cfa2f115..5f258b38 100755
+--- a/AndroidManifest.xml
++++ b/AndroidManifest.xml
+@@ -164,5 +164,9 @@
+ 
+         <service android:name=".handover.PeripheralHandoverService"
+         />
++
++        <uses-library android:name="com.nxp.nfc"
++            android:required="true"
++        />
+     </application>
+ </manifest>
+diff --git a/nci/jni/Android.bp b/nci/jni/Android.bp
+index 02dbd590..79d7d29f 100644
+--- a/nci/jni/Android.bp
++++ b/nci/jni/Android.bp
+@@ -10,8 +10,9 @@ cc_library_shared {
+         "-Wextra",
+         "-Wno-unused-parameter",
+         "-Werror",
+-
++        "-DNXP_EXTNS=TRUE",
+         "-DNXP_UICC_ENABLE",
++        "-DNFC_AGC_DEBUG_FEATURE=TRUE",
+     ],
+ 
+     srcs: ["**/*.cpp"],
+@@ -40,6 +41,7 @@ cc_library_shared {
+         "libnfc-nci",
+         "libchrome",
+         "libbase",
++        "vendor.nxp.nxpnfc@1.0",
+     ],
+ 
+     static_libs: ["libxml2"],
+diff --git a/nci/jni/JavaClassConstants.h b/nci/jni/JavaClassConstants.h
+index 46aee35f..164b68be 100644
+--- a/nci/jni/JavaClassConstants.h
++++ b/nci/jni/JavaClassConstants.h
+@@ -13,6 +13,25 @@
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
++/******************************************************************************
++ *
++ *  The original Work has been changed by NXP.
++ *
++ *  Copyright 2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
+ #pragma once
+ #include "NfcJniUtil.h"
+ 
+@@ -38,4 +57,5 @@ extern const char* gNativeLlcpConnectionlessSocketClassName;
+ extern const char* gNativeLlcpSocketClassName;
+ extern const char* gNativeNfcTagClassName;
+ extern const char* gNativeNfcManagerClassName;
++extern const char* gNativeT4tNfceeClassName;
+ }  // namespace android
+diff --git a/nci/jni/NativeNfcManager.cpp b/nci/jni/NativeNfcManager.cpp
+index 445a5ddc..43608b22 100644
+--- a/nci/jni/NativeNfcManager.cpp
++++ b/nci/jni/NativeNfcManager.cpp
+@@ -13,7 +13,25 @@
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
+-
++/******************************************************************************
++ *
++ *  The original Work has been changed by NXP.
++ *
++ *  Copyright 2020,2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
+ #include <android-base/stringprintf.h>
+ #include <base/logging.h>
+ #include <cutils/properties.h>
+@@ -43,6 +61,11 @@
+ #include "nfa_p2p_api.h"
+ #include "nfc_brcm_defs.h"
+ #include "nfc_config.h"
++#if(NXP_EXTNS == TRUE)
++#include "nfa_nfcee_int.h"
++#include "NativeT4tNfcee.h"
++
++#endif
+ #include "phNxpExtns.h"
+ #include "rw_api.h"
+ 
+@@ -52,6 +75,8 @@ extern tNFA_DM_DISC_FREQ_CFG* p_nfa_dm_rf_disc_freq_cfg;  // defined in stack
+ namespace android {
+ extern bool gIsTagDeactivating;
+ extern bool gIsSelectingRfInterface;
++const char* gNativeT4tNfceeClassName =
++    "com/android/nfc/dhimpl/NativeT4tNfceeManager";
+ extern void nativeNfcTag_doTransceiveStatus(tNFA_STATUS status, uint8_t* buf,
+                                             uint32_t buflen);
+ extern void nativeNfcTag_notifyRfTimeout();
+@@ -658,6 +683,15 @@ static void nfaConnectionCallback(uint8_t connEvent,
+       PeerToPeer::getInstance().connectionEventHandler(connEvent, eventData);
+       break;
+ 
++    #if (NXP_EXTNS == TRUE)
++    case NFA_T4TNFCEE_EVT:
++    case NFA_T4TNFCEE_READ_CPLT_EVT:
++    case NFA_T4TNFCEE_WRITE_CPLT_EVT:
++    case NFA_T4TNFCEE_CLEAR_CPLT_EVT:
++      t4tNfcEe.eventHandler(connEvent, eventData);
++      break;
++    #endif
++
+     default:
+       DLOG_IF(INFO, nfc_debug_enabled)
+           << StringPrintf("%s: unknown event ????", __func__);
+@@ -820,6 +854,9 @@ void nfaDeviceManagementCallback(uint8_t dmEvent,
+       DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+           "%s: NFA_DM_RF_FIELD_EVT; status=0x%X; field status=%u", __func__,
+           eventData->rf_field.status, eventData->rf_field.rf_field_status);
++#if (NFC_AGC_DEBUG_FEATURE == TRUE)
++      EXTNS_DebugAgcCfg(eventData->rf_field.rf_field_status);
++#endif
+       if (!sP2pActive && eventData->rf_field.status == NFA_STATUS_OK) {
+         struct nfc_jni_native_data* nat = getNative(NULL, NULL);
+         JNIEnv* e = NULL;
+@@ -1005,6 +1042,13 @@ static jboolean nfcManager_routeAid(JNIEnv* e, jobject, jbyteArray aid,
+   ScopedByteArrayRO bytes(e, aid);
+   buf = const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(&bytes[0]));
+   bufLen = bytes.size();
++  #if (NXP_EXTNS == TRUE)
++    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: check and update AID 1", __func__);
++    NativeT4tNfcee::getInstance().checkAndUpdateT4TAid(buf, (uint8_t*)&bufLen);
++
++    RoutingManager::getInstance().removeAidRouting(buf, bufLen);
++    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: check and update AID 2", __func__);
++  #endif
+   return RoutingManager::getInstance().addAidRouting(buf, bufLen, route,
+                                                      aidInfo, power);
+ }
+@@ -1141,6 +1185,9 @@ static jint nfcManager_getLfT3tMax(JNIEnv*, jobject) {
+ **
+ *******************************************************************************/
+ static jboolean nfcManager_doInitialize(JNIEnv* e, jobject o) {
++#if (NXP_EXTNS == TRUE)
++  tNFA_MW_VERSION mwVer;
++#endif
+   initializeGlobalDebugEnabledFlag();
+   tNFA_STATUS stat = NFA_STATUS_OK;
+   sIsRecovering = false;
+@@ -1152,6 +1199,13 @@ static jboolean nfcManager_doInitialize(JNIEnv* e, jobject o) {
+         << StringPrintf("%s: already enabled", __func__);
+     goto TheEnd;
+   }
++#if (NXP_EXTNS == TRUE)
++    mwVer=  NFA_GetMwVersion();
++    DLOG_IF(INFO, true) << StringPrintf(
++        "%s:  MW Version: NFC_AR_INFRA_%04X_%02d.%02x.%02x", __func__,
++        mwVer.validation, mwVer.android_version,
++        mwVer.major_version, mwVer.minor_version);
++#endif
+ 
+   powerSwitch.initialize(PowerSwitch::FULL_POWER);
+ 
+@@ -2118,6 +2172,27 @@ static void nfcManager_doStartStopPolling(JNIEnv* e, jobject o,
+   startStopPolling(start);
+ }
+ 
++/*******************************************************************************
++**
++** Function:        nfcManager_getT4TNfceePowerState
++**
++** Description:     Get the T4T Nfcee power state supported.
++**                  e: JVM environment.
++**                  o: Java object.
++**                  mode: Not used.
++**
++** Returns:         None
++**
++*******************************************************************************/
++static jint nfcManager_getT4TNfceePowerState(JNIEnv* e, jobject o) {
++  RoutingManager& routingManager = RoutingManager::getInstance();
++  int defaultPowerState = ~(routingManager.PWR_SWTCH_OFF_MASK |
++          routingManager.PWR_BATT_OFF_MASK);
++
++  return NfcConfig::getUnsigned(NAME_DEFAULT_T4TNFCEE_AID_POWER_STATE,
++          defaultPowerState);
++}
++
+ /*******************************************************************************
+ **
+ ** Function:        nfcManager_doSetNfcSecure
+@@ -2293,6 +2368,9 @@ static JNINativeMethod gMethods[] = {
+     {"doSetNfceePowerAndLinkCtrl", "(Z)V",
+      (void*)nfcManager_doSetNfceePowerAndLinkCtrl},
+ 
++    {"getT4TNfceePowerState", "()I",
++      (void*) nfcManager_getT4TNfceePowerState},
++
+     {"getRoutingTable", "()[B", (void*)nfcManager_doGetRoutingTable},
+ 
+     {"getMaxRoutingTableSize", "()I",
+@@ -2495,4 +2573,33 @@ static tNFA_STATUS stopPolling_rfDiscoveryDisabled() {
+   return stat;
+ }
+ 
++/*******************************************************************************
++ **
++ ** Function:        getConfig
++ **
++ ** Description:     read the config values from NFC controller.
++ **
++ ** Returns:         SUCCESS/FAILURE
++ **
++ *******************************************************************************/
++tNFA_STATUS getConfig(uint16_t* rspLen, uint8_t* configValue, uint8_t numParam,
++                      tNFA_PMID* param) {
++  tNFA_STATUS status = NFA_STATUS_FAILED;
++  if (rspLen == NULL || configValue == NULL || param == NULL)
++    return NFA_STATUS_FAILED;
++  SyncEventGuard guard(gNfaGetConfigEvent);
++  status = NFA_GetConfig(numParam, param);
++  if (status == NFA_STATUS_OK) {
++    if (gNfaGetConfigEvent.wait(2000) == false) {
++      *rspLen = 0;
++    } else {
++      *rspLen = gCurrentConfigLen;
++      memcpy(configValue, gConfig, gCurrentConfigLen);
++    }
++  } else {
++    *rspLen = 0;
++  }
++  return status;
++}
++
+ } /* namespace android */
+diff --git a/nci/jni/NativeNfcTag.cpp b/nci/jni/NativeNfcTag.cpp
+index a99dc941..65884f8b 100644
+--- a/nci/jni/NativeNfcTag.cpp
++++ b/nci/jni/NativeNfcTag.cpp
+@@ -13,7 +13,23 @@
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
+-
++/******************************************************************************
++ *
++ *  Copyright 2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
+ #include <android-base/stringprintf.h>
+ #include <base/logging.h>
+ #include <errno.h>
+@@ -111,6 +127,10 @@ uint8_t RW_DESELECT_REQ[] = {0xC2};
+ static jboolean sWriteOk = JNI_FALSE;
+ static jboolean sWriteWaitingForComplete = JNI_FALSE;
+ static bool sFormatOk = false;
++static bool sIsCheckingNDef = false;
++#if (NXP_EXTNS == TRUE)
++static uint8_t Presence_check_TypeB[] = {0xB2};
++#endif
+ static jboolean sConnectOk = JNI_FALSE;
+ static jboolean sConnectWaitingForComplete = JNI_FALSE;
+ static bool sGotDeactivate = false;
+@@ -576,10 +596,21 @@ static jint nativeNfcTag_doConnect(JNIEnv*, jobject, jint targetHandle) {
+     goto TheEnd;
+   }
+ 
++  #if (NXP_EXTNS == TRUE)
++  sCurrentConnectedHandle = targetHandle;
++  if (sCurrentConnectedTargetProtocol == NFC_PROTOCOL_T3BT) {
++    goto TheEnd;
++  }
++#endif
++
+   sCurrentConnectedTargetType = natTag.mTechList[i];
+   sCurrentConnectedTargetProtocol = natTag.mTechLibNfcTypes[i];
+   sCurrentConnectedHandle = targetHandle;
+ 
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++        "%s: TargetType=%d, TargetProtocol=%d", __func__,
++        sCurrentConnectedTargetType, sCurrentConnectedTargetProtocol);
++
+   if (sCurrentConnectedTargetProtocol != NFC_PROTOCOL_ISO_DEP &&
+       sCurrentConnectedTargetProtocol != NFC_PROTOCOL_MIFARE) {
+     DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+@@ -1230,6 +1261,18 @@ static jint nativeNfcTag_doCheckNdef(JNIEnv* e, jobject o, jintArray ndefInfo) {
+ 
+   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", __func__);
+ 
++  sIsCheckingNDef = true;
++#if (NXP_EXTNS == TRUE)
++  if (sCurrentConnectedTargetProtocol == NFA_PROTOCOL_T3BT) {
++    ndef = e->GetIntArrayElements(ndefInfo, 0);
++    ndef[0] = 0;
++    ndef[1] = NDEF_MODE_READ_ONLY;
++    e->ReleaseIntArrayElements(ndefInfo, ndef, 0);
++    sIsCheckingNDef = false;
++    return NFA_STATUS_FAILED;
++  }
++#endif
++
+   // special case for Kovio
+   if (sCurrentConnectedTargetProtocol == TARGET_TYPE_KOVIO_BARCODE) {
+     DLOG_IF(INFO, nfc_debug_enabled)
+@@ -1372,6 +1415,7 @@ static jboolean nativeNfcTag_doPresenceCheck(JNIEnv*, jobject) {
+   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s", __func__);
+   tNFA_STATUS status = NFA_STATUS_OK;
+   jboolean isPresent = JNI_FALSE;
++  int handle = sCurrentConnectedHandle;
+ 
+   // Special case for Kovio.  The deactivation would have already occurred
+   // but was ignored so that normal tag opertions could complete.  Now we
+@@ -1414,6 +1458,41 @@ static jboolean nativeNfcTag_doPresenceCheck(JNIEnv*, jobject) {
+         << StringPrintf("%s: tag already deactivated", __func__);
+     return JNI_FALSE;
+   }
++
++  #if (NXP_EXTNS == TRUE)
++  if (NfcTag::getInstance().mTechLibNfcTypes[handle] == NFA_PROTOCOL_T3BT) {
++    uint8_t* pbuf = NULL;
++    uint8_t bufLen = 0x00;
++    bool waitOk = false;
++    int timeout =
++        NfcTag::getInstance().getTransceiveTimeout(sCurrentConnectedTargetType);
++    DLOG_IF(INFO, nfc_debug_enabled)
++        << StringPrintf("%s: enter; timeout = %d", __func__, timeout);
++
++    SyncEventGuard g(sTransceiveEvent);
++    sTransceiveRfTimeout = false;
++    sWaitingForTransceive = true;
++    // sTransceiveDataLen = 0;
++    bufLen = (uint8_t)sizeof(Presence_check_TypeB);
++    pbuf = Presence_check_TypeB;
++    // memcpy(pbuf, Attrib_cmd_TypeB, bufLen);
++    status = NFA_SendRawFrame(pbuf, bufLen,
++                              NFA_DM_DEFAULT_PRESENCE_CHECK_START_DELAY);
++    if (status != NFA_STATUS_OK) {
++      LOG(ERROR) << StringPrintf("%s: fail send; error=%d", __func__, status);
++    } else
++      waitOk = sTransceiveEvent.wait(timeout);
++
++    if (waitOk == false || sTransceiveRfTimeout)  // if timeout occurred
++    {
++      return JNI_FALSE;
++      ;
++    } else {
++      return JNI_TRUE;
++    }
++  }
++#endif
++
+   if (sCurrentConnectedTargetProtocol == NFC_PROTOCOL_MIFARE && legacy_mfc_reader) {
+     status = EXTNS_MfcPresenceCheck();
+     if (status == NFCSTATUS_SUCCESS) {
+diff --git a/nci/jni/NativeNxpFeature.cpp b/nci/jni/NativeNxpFeature.cpp
+new file mode 100755
+index 00000000..a74a479b
+--- /dev/null
++++ b/nci/jni/NativeNxpFeature.cpp
+@@ -0,0 +1,339 @@
++/*
++ * Copyright (C) 2012 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++/******************************************************************************
++ *
++ *  The original Work has been changed by NXP
++ *
++ *  Copyright 2015-2020,2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
++#include <android-base/stringprintf.h>
++#include <base/logging.h>
++#include <errno.h>
++#include <semaphore.h>
++#include "JavaClassConstants.h"
++#include "NfcAdaptation.h"
++#include "NfcJniUtil.h"
++#include "RoutingManager.h"
++#include "SyncEvent.h"
++#include "config.h"
++#include "nfc_config.h"
++#include "nfa_api.h"
++#include "nfa_rw_api.h"
++
++#if (NXP_EXTNS == TRUE)
++using android::base::StringPrintf;
++
++extern bool nfc_debug_enabled;
++
++typedef struct nxp_feature_data {
++  SyncEvent NxpFeatureConfigEvt;
++  Mutex mMutex;
++  tNFA_STATUS wstatus;
++  uint8_t rsp_data[255];
++  uint8_t rsp_len;
++} Nxp_Feature_Data_t;
++
++typedef enum {
++  NCI_OID_SYSTEM_DEBUG_STATE_L1_MESSAGE = 0x35,
++  NCI_OID_SYSTEM_DEBUG_STATE_L2_MESSAGE,
++  NCI_OID_SYSTEM_DEBUG_STATE_L3_MESSAGE,
++} eNciSystemPropOpcodeIdentifier_t;
++
++namespace android {
++extern nfc_jni_native_data* getNative(JNIEnv* e, jobject o);
++static Nxp_Feature_Data_t gnxpfeature_conf;
++void SetCbStatus(tNFA_STATUS status);
++tNFA_STATUS GetCbStatus(void);
++static void NxpResponse_Cb(uint8_t event, uint16_t param_len, uint8_t* p_param);
++}  // namespace android
++
++namespace android {
++extern bool suppressLogs;
++void SetCbStatus(tNFA_STATUS status) { gnxpfeature_conf.wstatus = status; }
++
++tNFA_STATUS GetCbStatus(void) { return gnxpfeature_conf.wstatus; }
++
++void NxpPropCmd_OnResponseCallback(uint8_t event, uint16_t param_len,
++                                   uint8_t *p_param) {
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++    "NxpPropCmd_OnResponseCallback: Received length data = 0x%x status = "
++        "0x%x", param_len, p_param[3]);
++  uint8_t oid = p_param[1];
++  uint8_t status = NFA_STATUS_FAILED;
++
++  switch (oid) {
++  case (0x03):
++  /*FALL_THRU*/
++  case (0x1A):
++  /*FALL_THRU*/
++  case (0x1C):
++    status = p_param[3];
++    break;
++  case (0x1B):
++    status = p_param[param_len - 1];
++    break;
++  default:
++    LOG(ERROR) << StringPrintf("Propreitary Rsp: OID is not supported");
++    break;
++  }
++
++  android::SetCbStatus(status);
++
++  android::gnxpfeature_conf.rsp_len = (uint8_t)param_len;
++  memcpy(android::gnxpfeature_conf.rsp_data, p_param, param_len);
++  SyncEventGuard guard(android::gnxpfeature_conf.NxpFeatureConfigEvt);
++  android::gnxpfeature_conf.NxpFeatureConfigEvt.notifyOne();
++}
++
++tNFA_STATUS NxpPropCmd_send(uint8_t *pData4Tx, uint8_t dataLen,
++                            uint8_t *rsp_len, uint8_t *rsp_buf,
++                            uint32_t rspTimeout, tHAL_NFC_ENTRY *halMgr) {
++  tNFA_STATUS status = NFA_STATUS_FAILED;
++  bool retVal = false;
++
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: prop cmd being txed", __func__);
++
++  gnxpfeature_conf.mMutex.lock();
++
++  android::SetCbStatus(NFA_STATUS_FAILED);
++  SyncEventGuard guard(android::gnxpfeature_conf.NxpFeatureConfigEvt);
++
++  status =
++      NFA_SendRawVsCommand(dataLen, pData4Tx, NxpPropCmd_OnResponseCallback);
++  if (status == NFA_STATUS_OK) {
++    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: Success NFA_SendNxpNciCommand", __func__);
++
++    retVal = android::gnxpfeature_conf.NxpFeatureConfigEvt.wait(
++        rspTimeout); /* wait for callback */
++    if (retVal == false) {
++      android::SetCbStatus(NFA_STATUS_TIMEOUT);
++      android::gnxpfeature_conf.rsp_len = 0;
++      memset(android::gnxpfeature_conf.rsp_data, 0,
++             sizeof(android::gnxpfeature_conf.rsp_data));
++    }
++  } else {
++    LOG(ERROR) << StringPrintf("%s: Failed NFA_SendNxpNciCommand", __func__);
++  }
++  status = android::GetCbStatus();
++  if ((android::gnxpfeature_conf.rsp_len > 3) && (rsp_buf != NULL)) {
++    *rsp_len = android::gnxpfeature_conf.rsp_len - 3;
++    memcpy(rsp_buf, android::gnxpfeature_conf.rsp_data + 3,
++           android::gnxpfeature_conf.rsp_len - 3);
++  }
++  android::gnxpfeature_conf.mMutex.unlock();
++  return status;
++}
++
++static void NxpResponse_Cb(uint8_t event, uint16_t param_len,
++                           uint8_t* p_param) {
++  (void)event;
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++      "NxpResponse_Cb Received length data = 0x%x status = 0x%x", param_len,
++      p_param[3]);
++  if (p_param != NULL) {
++    if (p_param[3] == 0x00) {
++      SetCbStatus(NFA_STATUS_OK);
++    } else {
++      SetCbStatus(NFA_STATUS_FAILED);
++    }
++    gnxpfeature_conf.rsp_len = (uint8_t)param_len;
++    if (param_len > 0) {
++      memcpy(gnxpfeature_conf.rsp_data, p_param, param_len);
++    }
++    SyncEventGuard guard(gnxpfeature_conf.NxpFeatureConfigEvt);
++    gnxpfeature_conf.NxpFeatureConfigEvt.notifyOne();
++  }
++}
++
++
++/*******************************************************************************
++ **
++ ** Function:        NxpNfc_Write_Cmd()
++ **
++ ** Description:     Writes the command to NFCC
++ **
++ ** Returns:         success/failure
++ **
++ *******************************************************************************/
++tNFA_STATUS NxpNfc_Write_Cmd_Common(uint8_t retlen, uint8_t* buffer) {
++  tNFA_STATUS status = NFA_STATUS_FAILED;
++  SetCbStatus(NFA_STATUS_FAILED);
++  SyncEventGuard guard(gnxpfeature_conf.NxpFeatureConfigEvt);
++  status = NFA_SendRawVsCommand(retlen, buffer, NxpResponse_Cb);
++  if (status == NFA_STATUS_OK) {
++    DLOG_IF(INFO, nfc_debug_enabled)
++        << StringPrintf("%s: Success NFA_SendRawVsCommand", __func__);
++    gnxpfeature_conf.NxpFeatureConfigEvt.wait(); /* wait for callback */
++  } else {
++    LOG(ERROR) << StringPrintf("%s: Failed NFA_SendRawVsCommand", __func__);
++  }
++  status = GetCbStatus();
++  return status;
++}
++/*******************************************************************************
++ **
++ ** Function:        getNumValue()
++ **
++ ** Description:     get the value from th config file.
++ **
++ ** Returns:         success/failure
++ **
++ *******************************************************************************/
++uint32_t getNumValue(const char* key ,uint32_t value) {
++  return NfcConfig::getUnsigned(key, value);
++}
++
++/*******************************************************************************
++ **
++ ** Function:        send_flush_ram_to_flash
++ **
++ ** Description:     This is used to update ram to flash command to NFCC.
++ **                  This will write the contents of RAM to FLASH.This will
++ **                  be sent only one time after NFC init.
++ **
++ ** Returns:         NFA_STATUS_OK on success
++ **www
++ *******************************************************************************/
++tNFA_STATUS send_flush_ram_to_flash() {
++  DLOG_IF(INFO, nfc_debug_enabled)
++    << StringPrintf("%s: enter", __func__);
++  tNFA_STATUS status = NFA_STATUS_OK;
++  uint8_t  cmd[] = {0x2F, 0x21, 0x00};
++
++  status = NxpNfc_Write_Cmd_Common(sizeof(cmd), cmd);
++  if(status != NFA_STATUS_OK) {
++    DLOG_IF(ERROR, nfc_debug_enabled)
++      << StringPrintf("%s: send_flush_ram_to_flash sending status %x", __func__,status);
++  }
++  return status;
++}
++/*******************************************************************************
++ **
++ ** Function:        enableDisableLog(bool type)
++ **
++ ** Description:     This function is used to enable/disable the
++ **                  logging module for cmd/data exchanges.
++ **
++ ** Returns:         None
++ **
++ *******************************************************************************/
++void enableDisableLog(bool type) {
++  // static bool prev_trace_level = nfc_debug_enabled;
++
++  // NfcAdaptation& theInstance = NfcAdaptation::GetInstance();
++
++  // if (android::suppressLogs) {
++  //   if (true == type) {
++  //     if (nfc_debug_enabled != prev_trace_level) {
++  //       nfc_debug_enabled = prev_trace_level;
++  //       theInstance.HalSetProperty("nfc.debug_enabled", "1");
++  //     }
++  //   } else if (false == type) {
++  //     if (0 != nfc_debug_enabled) {
++  //       nfc_debug_enabled = 0;
++  //       theInstance.HalSetProperty("nfc.debug_enabled", "0");
++  //     }
++  //   }
++  // }
++}
++
++/*******************************************************************************
++**
++** Function:        nfaVSCNtfCallback
++**
++** Description:     Receives LxDebug events from stack.
++**                  Event: for which the callback is invoked
++**                  param_len: Len of the Parameters passed
++**                  p_param: Pointer to the event param
++**
++** Returns:         None
++**
++*******************************************************************************/
++void nfaVSCNtfCallback(uint8_t event, uint16_t param_len, uint8_t *p_param) {
++  (void)event;
++  DLOG_IF(INFO, nfc_debug_enabled)
++          << StringPrintf("%s: event = 0x%02X", __func__, event);
++  uint8_t op_code = (event & ~NCI_NTF_BIT);
++  uint32_t len;
++  uint8_t nciHdrLen = 3;
++
++  if(!p_param || param_len <= nciHdrLen) {
++    LOG(ERROR) << "Invalid Params. returning...";
++    return;
++  }
++
++  switch(op_code) {
++    case NCI_OID_SYSTEM_DEBUG_STATE_L1_MESSAGE:
++    break;
++
++    case NCI_OID_SYSTEM_DEBUG_STATE_L2_MESSAGE:
++      len = param_len - nciHdrLen;
++    {
++      struct nfc_jni_native_data* mNativeData = getNative(NULL, NULL);
++      JNIEnv* e = NULL;
++      ScopedAttach attach(mNativeData->vm, &e);
++      if (e == NULL) {
++        LOG(ERROR) << "jni env is null";
++        return;
++      }
++
++      jbyteArray retArray = e->NewByteArray(len);
++
++      if((uint32_t)e->GetArrayLength(retArray) != len)
++      {
++        e->DeleteLocalRef(retArray);
++        retArray = e->NewByteArray(len);
++      }
++      e->SetByteArrayRegion(retArray, 0, len, (jbyte*)(p_param + nciHdrLen));
++
++      // e->CallVoidMethod(mNativeData->manager,
++      //                 android::gCachedNfcManagerNotifyLxDebugInfo,
++      //                 (int)len, retArray);
++      if (e->ExceptionCheck()) {
++        e->ExceptionClear();
++        LOG(ERROR) << "fail notify";
++      }
++    }
++    break;
++
++    case NCI_OID_SYSTEM_DEBUG_STATE_L3_MESSAGE:
++    break;
++
++    default:
++      DLOG_IF(INFO, nfc_debug_enabled)
++          << StringPrintf("%s: unknown event ????", __func__);
++    break;
++  }
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: Exit", __func__);
++}
++
++
++} /*namespace android*/
++
++#endif
+diff --git a/nci/jni/NativeT4tNfcee.cpp b/nci/jni/NativeT4tNfcee.cpp
+new file mode 100644
+index 00000000..85d4b4a4
+--- /dev/null
++++ b/nci/jni/NativeT4tNfcee.cpp
+@@ -0,0 +1,882 @@
++/******************************************************************************
++ *
++ *  Copyright 2019-2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
++#if (NXP_EXTNS == TRUE)
++#include "NativeT4tNfcee.h"
++#include <android-base/stringprintf.h>
++#include <base/logging.h>
++#include <nativehelper/ScopedPrimitiveArray.h>
++#include "NfcJniUtil.h"
++#include "nci_defs_extns.h"
++#include "nfa_nfcee_api.h"
++#include "nfa_nfcee_int.h"
++#include "nfc_config.h"
++
++using android::base::StringPrintf;
++extern bool nfc_debug_enabled;
++
++/*Considering NCI response timeout which is 2s, Timeout set 100ms more*/
++#define T4TNFCEE_TIMEOUT 2100
++#define T4TOP_TIMEOUT 200
++#define FILE_ID_LEN 0x02
++
++extern bool gActivated;
++namespace android {
++extern bool isDiscoveryStarted();
++extern void startRfDiscovery(bool isStart);
++extern bool nfcManager_isNfcActive();
++extern tNFA_STATUS getConfig(uint16_t* len, uint8_t* configValue,
++                             uint8_t numParam, tNFA_PMID* param);
++extern tNFA_STATUS NxpNfc_Write_Cmd_Common(uint8_t retlen, uint8_t* buffer);
++extern int nfcManager_doPartialInitialize(JNIEnv* e, jobject o, jint mode);
++extern int nfcManager_doPartialDeInitialize(JNIEnv*, jobject);
++}  // namespace android
++
++NativeT4tNfcee NativeT4tNfcee::sNativeT4tNfceeInstance;
++bool NativeT4tNfcee::sIsNfcOffTriggered = false;
++
++NativeT4tNfcee::NativeT4tNfcee() { mBusy = false; memset (&mReadData, 0x00, sizeof(tNFA_RX_DATA)); mT4tOpStatus = NFA_STATUS_FAILED; }
++
++/*****************************************************************************
++**
++** Function:        getInstance
++**
++** Description:     Get the NativeT4tNfcee singleton object.
++**
++** Returns:         NativeT4tNfcee object.
++**
++*******************************************************************************/
++NativeT4tNfcee& NativeT4tNfcee::getInstance() {
++  return sNativeT4tNfceeInstance;
++}
++
++/*******************************************************************************
++**
++** Function:        initialize
++**
++** Description:     Initialize all member variables.
++**
++** Returns:         None.
++**
++*******************************************************************************/
++void NativeT4tNfcee::initialize(void) {
++  sIsNfcOffTriggered = false;
++  mBusy = false;
++}
++
++/*****************************************************************************
++**
++** Function:        onNfccShutdown
++**
++** Description:     This api shall be called in NFC OFF case.
++**
++** Returns:         none.
++**
++*******************************************************************************/
++void NativeT4tNfcee::onNfccShutdown() {
++  sIsNfcOffTriggered = true;
++  if(mBusy) {
++    /* Unblock JNI APIs */
++    {
++      SyncEventGuard g(mT4tNfcOffEvent);
++      if (mT4tNfcOffEvent.wait(T4TOP_TIMEOUT) == false) {
++        SyncEventGuard ga(mT4tNfcEeRWEvent);
++        mT4tNfcEeRWEvent.notifyOne();
++      }
++    }
++    /* Try to close the connection with t4t nfcee, discard the status */
++    (void)closeConnection();
++    resetBusy();
++  }
++}
++/*******************************************************************************
++**
++** Function:        t4tClearData
++**
++** Description:     This API will set all the T4T NFCEE NDEF data to zero.
++**                  This API can be called regardless of NDEF file lock state.
++**
++** Returns:         boolean : Return the Success or fail of the operation.
++**                  Return "True" when operation is successful. else "False"
++**
++*******************************************************************************/
++jboolean NativeT4tNfcee::t4tClearData(JNIEnv* e, jobject o) {
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s:Enter: ", __func__);
++
++  /*Local variable Initalization*/
++  uint8_t pFileId[] = {0xE1, 0x04};
++  jbyteArray fileIdArray = e->NewByteArray(sizeof(pFileId));
++  e->SetByteArrayRegion(fileIdArray, 0, sizeof(pFileId), (jbyte*)pFileId);
++  bool clear_status = false;
++
++  /*Validate Precondition*/
++  T4TNFCEE_STATUS_t t4tNfceeStatus =
++      validatePreCondition(OP_CLEAR, fileIdArray);
++
++  switch (t4tNfceeStatus) {
++    case STATUS_SUCCESS:
++      /*NFC is ON*/
++      clear_status = performT4tClearData(pFileId);
++      break;
++    case ERROR_NFC_NOT_ON:
++      /*NFC is OFF*/
++      // if (android::nfcManager_doPartialInitialize(e, o, NFA_MINIMUM_BOOT_MODE) ==
++      //     NFA_STATUS_OK) {
++        NativeT4tNfcee::getInstance().initialize();
++        clear_status = performT4tClearData(pFileId);
++      //   android::nfcManager_doPartialDeInitialize(NULL, NULL);
++      // }
++      break;
++    default:
++      DLOG_IF(ERROR, nfc_debug_enabled) << StringPrintf(
++          "%s:Exit: Returnig status : %d", __func__, clear_status);
++      break;
++  }
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s:Exit: ", __func__);
++  return clear_status;
++}
++/*******************************************************************************
++**
++** Function:        performT4tClearData
++**
++** Description:     This api clear the T4T Nfcee data
++**
++** Returns:         boolean : Return the Success or fail of the operation.
++**                  Return "True" when operation is successful. else "False"
++**
++*******************************************************************************/
++jboolean NativeT4tNfcee::performT4tClearData(uint8_t* fileId) {
++  bool t4tClearReturn = false;
++  tNFA_STATUS status = NFA_STATUS_FAILED;
++
++  /*Open connection and stop discovery*/
++  if (setup() != NFA_STATUS_OK) return t4tClearReturn;
++
++  /*Clear Ndef data*/
++  SyncEventGuard g(mT4tNfcEeClrDataEvent);
++  status = NFA_T4tNfcEeClear(fileId);
++  if (status == NFA_STATUS_OK) {
++    if (mT4tNfcEeClrDataEvent.wait(T4TNFCEE_TIMEOUT) == false)
++      t4tClearReturn = false;
++    else {
++      if (mT4tOpStatus == NFA_STATUS_OK) {
++        t4tClearReturn = true;
++      }
++    }
++  }
++
++  /*Close connection and start discovery*/
++  cleanup();
++  return t4tClearReturn;
++}
++/*******************************************************************************
++**
++** Function:        t4tWriteData
++**
++** Description:     Write the data into the T4T file of the specific file ID
++**
++** Returns:         Return the size of data written
++**                  Return negative number of error code
++**
++*******************************************************************************/
++jint NativeT4tNfcee::t4tWriteData(JNIEnv* e, jobject object, jbyteArray fileId,
++                                  jbyteArray data, int length) {
++  tNFA_STATUS status = NFA_STATUS_FAILED;
++
++  T4TNFCEE_STATUS_t t4tNfceeStatus =
++      validatePreCondition(OP_WRITE, fileId, data);
++  if (t4tNfceeStatus != STATUS_SUCCESS) return t4tNfceeStatus;
++
++  ScopedByteArrayRO bytes(e, fileId);
++  if (bytes.size() < FILE_ID_LEN) {
++    DLOG_IF(ERROR, nfc_debug_enabled)
++        << StringPrintf("%s:Wrong File Id", __func__);
++    return ERROR_INVALID_FILE_ID;
++  }
++
++  ScopedByteArrayRO bytesData(e, data);
++  if (bytesData.size() == 0x00) {
++    DLOG_IF(ERROR, nfc_debug_enabled)
++        << StringPrintf("%s:Empty Data", __func__);
++    return ERROR_EMPTY_PAYLOAD;
++  }
++
++  if ((int)bytesData.size() != length) {
++    DLOG_IF(ERROR, nfc_debug_enabled)
++        << StringPrintf("%s:Invalid Length", __func__);
++    return ERROR_INVALID_LENGTH;
++  }
++
++  if (setup() != NFA_STATUS_OK) return ERROR_CONNECTION_FAILED;
++
++  uint8_t* pFileId = NULL;
++  pFileId = const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(&bytes[0]));
++
++  uint8_t* pData = NULL;
++  pData = const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(&bytesData[0]));
++
++  jint t4tWriteReturn = STATUS_FAILED;
++  {
++    SyncEventGuard g(mT4tNfcEeRWEvent);
++    status = NFA_T4tNfcEeWrite(pFileId, pData, bytesData.size());
++    if (status == NFA_STATUS_OK) {
++      if (mT4tNfcEeRWEvent.wait(T4TNFCEE_TIMEOUT) == false)
++        t4tWriteReturn = STATUS_FAILED;
++      else {
++        if (mT4tOpStatus == NFA_STATUS_OK) {
++          /*if status is success then return length of data written*/
++          t4tWriteReturn = mReadData.len;
++        } else if (mT4tOpStatus == NFA_STATUS_REJECTED) {
++          t4tWriteReturn = ERROR_NDEF_VALIDATION_FAILED;
++        } else if (mT4tOpStatus == NFA_T4T_STATUS_INVALID_FILE_ID){
++          t4tWriteReturn = ERROR_INVALID_FILE_ID;
++        } else if (mT4tOpStatus == NFA_STATUS_READ_ONLY) {
++          t4tWriteReturn = ERROR_WRITE_PERMISSION;
++        } else {
++          t4tWriteReturn = STATUS_FAILED;
++        }
++      }
++    }
++  }
++
++  /*Close connection and start discovery*/
++  cleanup();
++  DLOG_IF(ERROR, nfc_debug_enabled) << StringPrintf(
++      "%s:Exit: Returnig status : %d", __func__, t4tWriteReturn);
++  return t4tWriteReturn;
++}
++
++/*******************************************************************************
++**
++** Function:        t4tReadData
++**
++** Description:     Read the data from the T4T file of the specific file ID.
++**
++** Returns:         byte[] : all the data previously written to the specific
++**                  file ID.
++**                  Return one byte '0xFF' if the data was never written to the
++**                  specific file ID,
++**                  Return null if reading fails.
++**
++*******************************************************************************/
++jbyteArray NativeT4tNfcee::t4tReadData(JNIEnv* e, jobject object,
++                                       jbyteArray fileId) {
++  tNFA_STATUS status = NFA_STATUS_FAILED;
++
++  T4TNFCEE_STATUS_t t4tNfceeStatus = validatePreCondition(OP_READ, fileId);
++  if (t4tNfceeStatus != STATUS_SUCCESS) return NULL;
++
++  ScopedByteArrayRO bytes(e, fileId);
++  ScopedLocalRef<jbyteArray> result(e, NULL);
++  if (bytes.size() < FILE_ID_LEN) {
++    DLOG_IF(ERROR, nfc_debug_enabled)
++        << StringPrintf("%s:Wrong File Id", __func__);
++    return NULL;
++  }
++
++  if (setup() != NFA_STATUS_OK) return NULL;
++
++  uint8_t* pFileId = NULL;
++  pFileId = const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(&bytes[0]));
++
++  { /*syncEvent code section*/
++    SyncEventGuard g(mT4tNfcEeRWEvent);
++    sRxDataBuffer.clear();
++    status = NFA_T4tNfcEeRead(pFileId);
++    if ((status != NFA_STATUS_OK) ||
++        (mT4tNfcEeRWEvent.wait(T4TNFCEE_TIMEOUT) == false)) {
++      DLOG_IF(ERROR, nfc_debug_enabled)
++          << StringPrintf("%s:Read Failed, status = 0x%X", __func__, status);
++      cleanup();
++      return NULL;
++    }
++  }
++
++  if (sRxDataBuffer.size() > 0) {
++    result.reset(e->NewByteArray(sRxDataBuffer.size()));
++    if (result.get() != NULL) {
++      e->SetByteArrayRegion(result.get(), 0, sRxDataBuffer.size(),
++            (const jbyte*)sRxDataBuffer.data());
++    } else {
++      char data[1] = {0xFF};
++      result.reset(e->NewByteArray(0x01));
++      e->SetByteArrayRegion(result.get(), 0, 0x01, (jbyte*)data);
++      LOG(ERROR) << StringPrintf("%s: Failed to allocate java byte array",
++               __func__);
++    }
++    sRxDataBuffer.clear();
++  } else if (mT4tOpStatus == NFA_T4T_STATUS_INVALID_FILE_ID){
++    char data[1] = {0xFF};
++    result.reset(e->NewByteArray(0x01));
++    e->SetByteArrayRegion(result.get(), 0, 0x01, (jbyte*)data);
++  }
++  /*Close connection and start discovery*/
++  cleanup();
++  return result.release();
++}
++
++/*******************************************************************************
++**
++** Function:        openConnection
++**
++** Description:     Open T4T Nfcee Connection
++**
++** Returns:         Status
++**
++*******************************************************************************/
++tNFA_STATUS NativeT4tNfcee::openConnection() {
++  tNFA_STATUS status = NFA_STATUS_FAILED;
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: Enter", __func__);
++  SyncEventGuard g(mT4tNfcEeEvent);
++  status = NFA_T4tNfcEeOpenConnection();
++  if (status == NFA_STATUS_OK) {
++    if (mT4tNfcEeEvent.wait(T4TNFCEE_TIMEOUT) == false)
++      status = NFA_STATUS_FAILED;
++    else
++      status = mT4tNfcEeEventStat;
++  }
++  DLOG_IF(INFO, nfc_debug_enabled)
++      << StringPrintf("%s: Exit status = 0x%02x", __func__, status);
++  return status;
++}
++
++/*******************************************************************************
++**
++** Function:        closeConnection
++**
++** Description:     Close T4T Nfcee Connection
++**
++** Returns:         Status
++**
++*******************************************************************************/
++tNFA_STATUS NativeT4tNfcee::closeConnection() {
++  tNFA_STATUS status = NFA_STATUS_FAILED;
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: Enter", __func__);
++  {
++    SyncEventGuard g(mT4tNfcEeEvent);
++    status = NFA_T4tNfcEeCloseConnection();
++    if (status == NFA_STATUS_OK) {
++      if (mT4tNfcEeEvent.wait(T4TNFCEE_TIMEOUT) == false)
++        status = NFA_STATUS_FAILED;
++      else
++        status = mT4tNfcEeEventStat;
++    }
++  }
++
++  DLOG_IF(INFO, nfc_debug_enabled)
++      << StringPrintf("%s: Exit status = 0x%02x", __func__, status);
++  return status;
++}
++
++/*******************************************************************************
++**
++** Function:        setup
++**
++** Description:     stops Discovery and opens T4TNFCEE connection
++**
++** Returns:         Status
++**
++*******************************************************************************/
++tNFA_STATUS NativeT4tNfcee::setup(void) {
++  tNFA_STATUS status = NFA_STATUS_FAILED;
++  setBusy();
++  if (android::isDiscoveryStarted()) {
++    android::startRfDiscovery(false);
++  }
++
++  status = openConnection();
++  if (status != NFA_STATUS_OK) {
++    DLOG_IF(ERROR, nfc_debug_enabled) << StringPrintf(
++        "%s: openConnection Failed, status = 0x%X", __func__, status);
++    if (!android::isDiscoveryStarted()) android::startRfDiscovery(true);
++    resetBusy();
++  }
++  return status;
++}
++/*******************************************************************************
++**
++** Function:        cleanup
++**
++** Description:     closes connection and starts discovery
++**
++** Returns:         Status
++**
++*******************************************************************************/
++void NativeT4tNfcee::cleanup(void) {
++
++  if(sIsNfcOffTriggered) {
++    SyncEventGuard g(mT4tNfcOffEvent);
++    mT4tNfcOffEvent.notifyOne();
++    DLOG_IF(ERROR, nfc_debug_enabled) << StringPrintf("%s: Nfc Off triggered", __func__);
++    return;
++  }
++  if (closeConnection() != NFA_STATUS_OK) {
++    DLOG_IF(ERROR, nfc_debug_enabled) << StringPrintf("%s: closeConnection Failed", __func__);
++  }
++  if (!android::isDiscoveryStarted() ) {
++    android::startRfDiscovery(true);
++  }
++  resetBusy();
++}
++
++/*******************************************************************************
++**
++** Function:        validatePreCondition
++**
++** Description:     Runs precondition checks for requested operation
++**
++** Returns:         Status
++**
++*******************************************************************************/
++T4TNFCEE_STATUS_t NativeT4tNfcee::validatePreCondition(T4TNFCEE_OPERATIONS_t op,
++                                                       jbyteArray fileId,
++                                                       jbyteArray data) {
++  T4TNFCEE_STATUS_t t4tNfceeStatus = STATUS_SUCCESS;
++  if (!android::nfcManager_isNfcActive()) {
++    t4tNfceeStatus = ERROR_NFC_NOT_ON;
++  } else if (sIsNfcOffTriggered) {
++    t4tNfceeStatus = ERROR_NFC_OFF_TRIGGERED;
++  }else if (gActivated) {
++    t4tNfceeStatus = ERROR_RF_ACTIVATED;
++  } else if (fileId == NULL) {
++    DLOG_IF(ERROR, nfc_debug_enabled)
++        << StringPrintf("%s:Invalid File Id", __func__);
++    t4tNfceeStatus = ERROR_INVALID_FILE_ID;
++  }
++
++  switch (op) {
++    case OP_READ:
++      break;
++    case OP_WRITE:
++      if (data == NULL) {
++        DLOG_IF(ERROR, nfc_debug_enabled)
++            << StringPrintf("%s:Empty data", __func__);
++        t4tNfceeStatus = ERROR_EMPTY_PAYLOAD;
++      }
++      break;
++    case OP_LOCK:
++      if (t4tNfceeStatus != STATUS_SUCCESS) break;
++      if (!isNdefWritePermission()) t4tNfceeStatus = ERROR_WRITE_PERMISSION;
++      break;
++    case OP_CLEAR:
++    [[fallthrough]];
++    default:
++      break;
++  }
++  return t4tNfceeStatus;
++}
++
++/*******************************************************************************
++**
++** Function:        t4tReadComplete
++**
++** Description:     Updates read data to the waiting READ API
++**
++** Returns:         none
++**
++*******************************************************************************/
++void NativeT4tNfcee::t4tReadComplete(tNFA_STATUS status, tNFA_RX_DATA data) {
++  mT4tOpStatus = status;
++  if (status == NFA_STATUS_OK) {
++    if(data.len > 0) {
++      sRxDataBuffer.append(data.p_data, data.len);
++      DLOG_IF(INFO, nfc_debug_enabled)
++        << StringPrintf("%s: Read Data len new: %d ", __func__, data.len);
++    }
++  }
++  SyncEventGuard g(mT4tNfcEeRWEvent);
++  mT4tNfcEeRWEvent.notifyOne();
++}
++
++/*******************************************************************************
++ **
++ ** Function:        t4tWriteComplete
++ **
++ ** Description:     Returns write complete information
++ **
++ ** Returns:         none
++ **
++ *******************************************************************************/
++void NativeT4tNfcee::t4tWriteComplete(tNFA_STATUS status, tNFA_RX_DATA data) {
++  mReadData.len = 0x00;
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: Enter", __func__);
++  if (status == NFA_STATUS_OK) mReadData.len = data.len;
++  mT4tOpStatus = status;
++  SyncEventGuard g(mT4tNfcEeRWEvent);
++  mT4tNfcEeRWEvent.notifyOne();
++}
++/*******************************************************************************
++ **
++ ** Function:        t4tClearComplete
++ **
++ ** Description:     Update T4T clear data status, waiting T4tClearData API.
++ **
++ ** Returns:         none
++ **
++ *******************************************************************************/
++void NativeT4tNfcee::t4tClearComplete(tNFA_STATUS status) {
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: Enter", __func__);
++  mT4tOpStatus = status;
++  SyncEventGuard g(mT4tNfcEeClrDataEvent);
++  mT4tNfcEeClrDataEvent.notifyOne();
++}
++/*******************************************************************************
++**
++** Function:        t4tNfceeEventHandler
++**
++** Description:     Handles callback events received from lower layer
++**
++** Returns:         none
++**
++*******************************************************************************/
++void NativeT4tNfcee::eventHandler(uint8_t event,
++                                  tNFA_CONN_EVT_DATA* eventData) {
++  switch (event) {
++    case NFA_T4TNFCEE_EVT:
++      DLOG_IF(INFO, nfc_debug_enabled)
++          << StringPrintf("%s: NFA_T4TNFCEE_EVT", __func__);
++      {
++        SyncEventGuard guard(mT4tNfcEeEvent);
++        mT4tNfcEeEventStat = eventData->status;
++        mT4tNfcEeEvent.notifyOne();
++      }
++      break;
++
++    case NFA_T4TNFCEE_READ_CPLT_EVT:
++      DLOG_IF(INFO, nfc_debug_enabled)
++          << StringPrintf("%s: NFA_T4TNFCEE_READ_CPLT_EVT", __func__);
++      t4tReadComplete(eventData->status, eventData->data);
++      break;
++
++    case NFA_T4TNFCEE_WRITE_CPLT_EVT:
++      DLOG_IF(INFO, nfc_debug_enabled)
++          << StringPrintf("%s: NFA_T4TNFCEE_WRITE_CPLT_EVT", __func__);
++      t4tWriteComplete(eventData->status, eventData->data);
++      break;
++
++    case NFA_T4TNFCEE_CLEAR_CPLT_EVT:
++      DLOG_IF(INFO, nfc_debug_enabled)
++          << StringPrintf("%s: NFA_T4TNFCEE_CLEAR_CPLT_EVT", __func__);
++      t4tClearComplete(eventData->status);
++      break;
++
++    default:
++      DLOG_IF(INFO, nfc_debug_enabled)
++          << StringPrintf("%s: unknown Event", __func__);
++      break;
++  }
++}
++
++/*******************************************************************************
++**
++** Function:        doChangeT4tFileWritePerm
++**
++** Description:     Set/Reset the lock bit for contact or/and contact less NDEF files.
++**
++** Parameter:       param_val: Reference to a value which shall be modified by this API
++**                  const bool& lock : Informs about how to modify the param_val
++**
++** Returns:         boolean : "True" if param_val is modified else "False"
++**
++*******************************************************************************/
++bool NativeT4tNfcee::doChangeT4tFileWritePerm(uint8_t& param_val, const bool& lock) {
++  bool status = false;
++  if (lock) { /* Disable the lock bit*/
++    if (param_val & (1 << MASK_LOCK_BIT)) {
++      param_val &= ~(1 << MASK_LOCK_BIT); /* Reset bit6 to disable write permission */
++      status = true;
++    } else {
++      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: Lock bit is already disable",__func__);
++    }
++  } else { /* Enable the lock bit*/
++    if (!(param_val & (1 << MASK_LOCK_BIT))) {
++      param_val |= (1 << MASK_LOCK_BIT); /* Set bit6 to enable write permission */
++      status = true;
++    } else {
++      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: Lock bit is already set", __func__);
++    }
++  }
++  return status;
++}
++
++/*******************************************************************************
++**
++** Function:        doGetT4tConfVals
++**
++** Description:     This function gets the T4T config values from NFCC.
++**
++** Parameter:       uint8_t& clNdefFileValue: reference variable to hold value of
++**                                        contactless (A095) tag
++**                  uint8_t& cNdefFileValue : reference variable to hold value of
++**                                        contact (A110) tag
++** Returns:         "TRUE" if value is successfully retrieved
++**                  "FALSE" if error occurred or T4T feature is disabled
++**
++*******************************************************************************/
++bool NativeT4tNfcee::doGetT4tConfVals(uint8_t& clNdefFileValue, uint8_t& cNdefFileValue) {
++  tNFA_PMID t4tNfcEeNdef[] = { NXP_NFC_SET_CONFIG_PARAM_EXT, NXP_NFC_CLPARAM_ID_T4T_NFCEE,
++          NXP_NFC_SET_CONFIG_PARAM_EXT_ID1, NXP_NFC_CPARAM_ID_T4T_NFCEE };
++  uint8_t configValue[MAX_CONFIG_VALUE_LEN] = {0};
++  tNFA_STATUS status = NFA_STATUS_FAILED;
++  uint16_t rspLen = 0;
++
++  status = android::getConfig(&rspLen, configValue, NXP_NFC_NUM_PARAM_T4T_NFCEE, t4tNfcEeNdef);
++  if(rspLen == 0x0A) { /* Payload len of Get config for A095 & A110 */
++    clNdefFileValue = *(configValue + NXP_PARAM_GET_CONFIG_INDEX);
++    cNdefFileValue = *(configValue + NXP_PARAM_GET_CONFIG_INDEX1);
++  }
++  if ((status != NFA_STATUS_OK) || !(clNdefFileValue & MASK_T4T_FEATURE_BIT)) {
++    return false;
++  }
++  return true;
++}
++
++/*******************************************************************************
++**
++** Function:        doLockT4tData
++**
++** Description:     Lock/Unlock the data in the T4T NDEF file.
++**
++** Parameter:       boolean lock : True(lock) or False(unlock)
++**
++** Returns:         boolean : Return the Success or fail of the operation.
++**                  Return "True" when operation is successful. else "False"
++**
++*******************************************************************************/
++bool NativeT4tNfcee::doLockT4tData(JNIEnv* e, jobject o, bool lock) {
++  DLOG_IF(INFO, nfc_debug_enabled)
++      << StringPrintf("%s: enter %d", __func__, lock);
++
++  uint8_t ndef_fileId[] = {0xE1, 0x04};
++  jbyteArray fileIdArray = e->NewByteArray(2);
++  e->SetByteArrayRegion(fileIdArray, 0, 2, (jbyte*)ndef_fileId);
++
++  T4TNFCEE_STATUS_t t4tNfceeStatus = validatePreCondition(OP_LOCK, fileIdArray);
++  if (t4tNfceeStatus != STATUS_SUCCESS) return false;
++
++  tNFA_STATUS status = NFA_STATUS_FAILED;
++
++  uint8_t clNdefFileValue = 0, cNdefFileValue = 0;
++  if(!doGetT4tConfVals(clNdefFileValue, cNdefFileValue))
++    return false;
++
++  if (android::isDiscoveryStarted()) {
++    android::startRfDiscovery(false);
++  }
++
++  std::vector<uint8_t> cNdefcmd = {0x20,
++                                   0x02,
++                                   0x05,
++                                   0x01,
++                                   NXP_NFC_SET_CONFIG_PARAM_EXT_ID1,
++                                   NXP_NFC_CPARAM_ID_T4T_NFCEE,
++                                   NXP_PARAM_LEN_T4T_NFCEE};
++
++  if (doChangeT4tFileWritePerm(cNdefFileValue, lock)) {
++    cNdefcmd.push_back(cNdefFileValue);
++    if ((NfcConfig::getUnsigned(NAME_NXP_T4T_NFCEE_ENABLE, 0x00) &
++         (1 << MASK_LOCK_BIT)) &&
++        doChangeT4tFileWritePerm(clNdefFileValue, lock)) {
++      std::vector<uint8_t> clNdefcmd = {NXP_NFC_SET_CONFIG_PARAM_EXT,
++                                        NXP_NFC_CLPARAM_ID_T4T_NFCEE,
++                                        NXP_PARAM_LEN_T4T_NFCEE};
++      int setConfigindex = 2;
++      cNdefcmd.at(setConfigindex) = NXP_PARAM_SET_CONFIG_LEN;
++      cNdefcmd.at(++setConfigindex) = NXP_PARAM_SET_CONFIG_PARAM;
++      clNdefcmd.push_back(clNdefFileValue);
++      cNdefcmd.insert(cNdefcmd.end(), &clNdefcmd[0],
++                      &clNdefcmd[0] + clNdefcmd.size());
++    }
++    status = android::NxpNfc_Write_Cmd_Common(cNdefcmd.size(), &cNdefcmd[0]);
++  }
++
++  if (!android::isDiscoveryStarted()) android::startRfDiscovery(true);
++  if (status != NFA_STATUS_OK) return false;
++
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: Exit", __func__);
++  return true;
++}
++
++/*******************************************************************************
++**
++** Function:        isLockedT4tData
++**
++** Description:     Check Lock status of the T4T NDEF file.
++**
++** Parameter:       NULL
++**
++** Returns:         Return T4T NDEF lock status.
++**                  Return "True" when T4T data is locked (un-writable).
++**                  Otherwise, "False" shall be returned.
++**
++*******************************************************************************/
++bool NativeT4tNfcee::isLockedT4tData(JNIEnv* e, jobject o) {
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", __func__);
++
++  uint8_t ndef_fileId[] = {0xE1, 0x04};
++  jbyteArray fileIdArray = e->NewByteArray(2);
++  e->SetByteArrayRegion(fileIdArray, 0, 2, (jbyte*)ndef_fileId);
++
++  T4TNFCEE_STATUS_t t4tNfceeStatus = validatePreCondition(OP_LOCK, fileIdArray);
++  if (t4tNfceeStatus != STATUS_SUCCESS) return false;
++
++  uint8_t clNdefFileValue = 0, cNdefFileValue = 0;
++  if(!doGetT4tConfVals(clNdefFileValue, cNdefFileValue))
++    return false;
++
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: Exit", __func__);
++
++  return (((cNdefFileValue & (1 << MASK_LOCK_BIT)) == 0) ? true : false);
++}
++/*******************************************************************************
++**
++** Function:        isNdefWritePermission
++**
++** Description:     Read from config file for write permission
++**
++** Parameter:       NULL
++**
++** Returns:         Return T4T NDEF write permission status.
++**                  Return "True" when T4T write permission allow to change.
++**                  Otherwise, "False" shall be returned.
++**
++*******************************************************************************/
++bool NativeT4tNfcee::isNdefWritePermission() {
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", __func__);
++  unsigned long num = 0x00;
++  bool isNdefWriteAccess = false;
++  if (NfcConfig::hasKey(NAME_NXP_T4T_NFCEE_ENABLE))
++    num = NfcConfig::getUnsigned(NAME_NXP_T4T_NFCEE_ENABLE);
++
++  if ((num & MASK_T4T_FEATURE_BIT) && (num & (1 << MASK_PROP_NDEF_FILE_BIT)))
++    isNdefWriteAccess = true;
++
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: Exit 0x%lx", __func__, num);
++  return isNdefWriteAccess;
++}
++/*******************************************************************************
++ **
++ ** Function:        isT4tNfceeBusy
++ **
++ ** Description:     Returns True if T4tNfcee operation is ongoing else false
++ **
++ ** Returns:         true/false
++ **
++ *******************************************************************************/
++bool NativeT4tNfcee::isT4tNfceeBusy(void) { return mBusy; }
++
++/*******************************************************************************
++ **
++ ** Function:        setBusy
++ **
++ ** Description:     Sets busy flag indicating T4T operation is ongoing
++ **
++ ** Returns:         none
++ **
++ *******************************************************************************/
++void NativeT4tNfcee::setBusy() { mBusy = true; }
++
++/*******************************************************************************
++ **
++ ** Function:        resetBusy
++ **
++ ** Description:     Resets busy flag indicating T4T operation is completed
++ **
++ ** Returns:         none
++ **
++ *******************************************************************************/
++void NativeT4tNfcee::resetBusy() { mBusy = false; }
++/*******************************************************************************
++**
++** Function:        getT4TNfceeAid
++**
++** Description:     Get the T4T Nfcee AID.
++**
++** Returns:         T4T AID: vector<uint8_t>
++**
++*******************************************************************************/
++vector<uint8_t> NativeT4tNfcee::getT4TNfceeAid() {
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s:enter", __func__);
++
++  std::vector<uint8_t> t4tNfceeAidBuf{0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01};
++
++  if (NfcConfig::hasKey(NAME_NXP_T4T_NDEF_NFCEE_AID)) {
++    t4tNfceeAidBuf = NfcConfig::getBytes(NAME_NXP_T4T_NDEF_NFCEE_AID);
++  }
++
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s:Exit", __func__);
++
++  return t4tNfceeAidBuf;
++}
++
++/*******************************************************************************
++**
++** Function:        isFwSupportNonStdT4TAid
++**
++** Description:     Check FW supports Non-standard AID or not.
++**
++** Returns:         true: FW support NON-STD AID
++**                  false: FW not support NON-STD AID
++**
++*******************************************************************************/
++bool NativeT4tNfcee::isFwSupportNonStdT4TAid() {
++  tNFC_FW_VERSION nfc_native_fw_version;
++  jboolean isFwSupport = false;
++  memset(&nfc_native_fw_version, 0, sizeof(nfc_native_fw_version));
++  const uint8_t FW_ROM_VERSION = 0x01;
++  const uint8_t FW_MAJOR_VERSION_SN1XX = 0x10;
++  const uint8_t FW_MAJOR_VERSION_SN2XX = 0x01;
++  const uint8_t FW_MINOR_VERSION_SN1XX = 0x54;
++  nfc_native_fw_version = nfc_ncif_getFWVersion();
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++      "FW Version: %x.%x.%x", nfc_native_fw_version.rom_code_version,
++      nfc_native_fw_version.major_version, nfc_native_fw_version.minor_version);
++
++  if (nfc_native_fw_version.rom_code_version == FW_ROM_VERSION) {
++    if ((nfc_native_fw_version.major_version == FW_MAJOR_VERSION_SN1XX &&
++         nfc_native_fw_version.minor_version >= FW_MINOR_VERSION_SN1XX) ||
++        (nfc_native_fw_version.major_version == FW_MAJOR_VERSION_SN2XX)) {
++      isFwSupport = true;
++    }
++  }
++  LOG(INFO) << StringPrintf(
++      "nfcManager_isFwSupportNonStdT4TAid Enter isFwSupport = %d", isFwSupport);
++  return isFwSupport;
++}
++/*******************************************************************************
++**
++** Function:        checkAndUpdateT4TAid
++**
++** Description:     Check and update T4T Ndef Nfcee AID.
++**
++** Returns:         void
++**
++*******************************************************************************/
++void NativeT4tNfcee::checkAndUpdateT4TAid(uint8_t* t4tNdefAid,
++                                          uint8_t* t4tNdefAidLen) {
++  if (!isFwSupportNonStdT4TAid()) {
++    uint8_t stdT4tAid[] = {0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01};
++    *t4tNdefAidLen = sizeof(stdT4tAid);
++    memcpy(t4tNdefAid, stdT4tAid, *t4tNdefAidLen);
++  } else {
++    vector<uint8_t> t4tNfceeAidBuf = getT4TNfceeAid();
++    uint8_t* t4tAidBuf = t4tNfceeAidBuf.data();
++    *t4tNdefAidLen = t4tNfceeAidBuf.size();
++    memcpy(t4tNdefAid, t4tAidBuf, *t4tNdefAidLen);
++  }
++}
++#endif
+diff --git a/nci/jni/NativeT4tNfcee.h b/nci/jni/NativeT4tNfcee.h
+new file mode 100644
+index 00000000..9c9f38b9
+--- /dev/null
++++ b/nci/jni/NativeT4tNfcee.h
+@@ -0,0 +1,387 @@
++/******************************************************************************
++ *
++ *  Copyright 2019-2020,2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
++#if (NXP_EXTNS == TRUE)
++#include "NfcJniUtil.h"
++#include "SyncEvent.h"
++#include "nfa_api.h"
++#include <nativehelper/ScopedLocalRef.h>
++#define t4tNfcEe (NativeT4tNfcee::getInstance())
++
++typedef enum { OP_READ = 0, OP_WRITE, OP_LOCK, OP_CLEAR } T4TNFCEE_OPERATIONS_t;
++
++typedef enum {
++  STATUS_SUCCESS = 0,
++  STATUS_FAILED = -1,
++  ERROR_RF_ACTIVATED = -2,
++  ERROR_MPOS_ON = -3,
++  ERROR_NFC_NOT_ON = -4,
++  ERROR_INVALID_FILE_ID = -5,
++  ERROR_INVALID_LENGTH = -6,
++  ERROR_CONNECTION_FAILED = -7,
++  ERROR_EMPTY_PAYLOAD = -8,
++  ERROR_NDEF_VALIDATION_FAILED = -9,
++  ERROR_WRITE_PERMISSION = -10,
++  ERROR_NFC_OFF_TRIGGERED = -11,
++} T4TNFCEE_STATUS_t;
++
++class NativeT4tNfcee {
++ public:
++  SyncEvent mT4tNfceeMPOSEvt;
++  /*****************************************************************************
++  **
++  ** Function:        getInstance
++  **
++  ** Description:     Get the NativeT4tNfcee singleton object.
++  **
++  ** Returns:         NativeT4tNfcee object.
++  **
++  *******************************************************************************/
++  static NativeT4tNfcee& getInstance();
++
++  /*******************************************************************************
++  **
++  ** Function:        initialize
++  **
++  ** Description:     Initialize all member variables.
++  **
++  ** Returns:         None.
++  **
++  *******************************************************************************/
++  void initialize(void);
++  /*****************************************************************************
++  **
++  ** Function:        onNfccShutdown
++  **
++  ** Description:     This api shall be called in NFC OFF case.
++  **
++  ** Returns:         none.
++  **
++  *******************************************************************************/
++  void onNfccShutdown();
++
++  /*******************************************************************************
++  **
++  ** Function:        t4tWriteData
++  **
++  ** Description:     Write the data into the T4T file of the specific file ID
++  **
++  ** Returns:         Return the size of data written
++  **                  Return negative number of error code
++  **
++  *******************************************************************************/
++  int t4tWriteData(JNIEnv* e, jobject o, jbyteArray fileId, jbyteArray data,
++                   int length);
++  /*******************************************************************************
++  **
++  ** Function:        t4tClearData
++  **
++  ** Description:     This API will set all the T4T NFCEE NDEF data to zero.
++  **                  This API can be called regardless of NDEF file lock state.
++  **
++  ** Returns:         boolean : Return the Success or fail of the operation.
++  **                  Return "True" when operation is successful. else "False"
++  **
++  *******************************************************************************/
++  jboolean t4tClearData(JNIEnv* e, jobject o);
++  /*******************************************************************************
++  **
++  ** Function:        performT4tClearData
++  **
++  ** Description:     This api clear the T4T Nfcee data
++  **
++  ** Returns:         boolean : Return the Success or fail of the operation.
++  **                  Return "True" when operation is successful. else "False"
++  **
++  *******************************************************************************/
++  jboolean performT4tClearData(uint8_t* fileId);
++  /*******************************************************************************
++  **
++  ** Function:        t4tReadData
++  **
++  ** Description:     Read the data from the T4T file of the specific file ID.
++  **
++  ** Returns:         byte[] : all the data previously written to the specific
++  **                  file ID.
++  **                  Return one byte '0xFF' if the data was never written to
++  *the
++  **                  specific file ID,
++  **                  Return null if reading fails.
++  **
++  *******************************************************************************/
++  jbyteArray t4tReadData(JNIEnv* e, jobject o, jbyteArray fileId);
++
++  /*******************************************************************************
++  **
++  ** Function:        t4tReadComplete
++  **
++  ** Description:     Updates read data to the waiting READ API
++  **
++  ** Returns:         none
++  **
++  *******************************************************************************/
++  void t4tReadComplete(tNFA_STATUS status, tNFA_RX_DATA data);
++
++  /*******************************************************************************
++   **
++   ** Function:        t4tWriteComplete
++   **
++   ** Description:     Returns write complete information
++   **
++   ** Returns:         none
++   **
++   *******************************************************************************/
++  void t4tWriteComplete(tNFA_STATUS status, tNFA_RX_DATA data);
++  /*******************************************************************************
++   **
++   ** Function:        t4tClearComplete
++   **
++   ** Description:     Update T4T clear data status, waiting T4tClearData API.
++   **
++   ** Returns:         none
++   **
++   *******************************************************************************/
++  void t4tClearComplete(tNFA_STATUS status);
++  /*******************************************************************************
++  **
++  ** Function:        doChangeT4tFileWritePerm
++  **
++  ** Description:     Set/Reset the lock bit for contact or/and contact less NDEF files.
++  **
++  ** Parameter:       param_val: Reference to a value which shall be modified by this API
++  **                  const bool& lock : Informs about how to modify the param_val
++  **
++  ** Returns:         boolean : "True" if param_val is modified else "False"
++  **
++  *******************************************************************************/
++  bool doChangeT4tFileWritePerm(uint8_t& param_val, const bool& lock);
++  /*******************************************************************************
++  **
++  ** Function:        doGetT4tConfVals
++  **
++  ** Description:     This function gets the T4T config values from NFCC.
++  **
++  ** Parameter:       uint8_t& clNdefFileValue: reference variable to hold value of
++  **                                        contactless (A095) tag
++  **                  uint8_t& cNdefFileValue : reference variable to hold value of
++  **                                        contact (A110) tag
++  ** Returns:         "TRUE" if value is successfully retrieved
++  **                  "FALSE" if error occurred or T4T feature is disabled
++  **
++  *******************************************************************************/
++  bool doGetT4tConfVals(uint8_t& clNdefFileValue, uint8_t& cNdefFileValue);
++  /*******************************************************************************
++  **
++  ** Function:        doLockT4tData
++  **
++  ** Description:     Lock/Unlock the data in the T4T NDEF file.
++  **
++  ** Parameter:       boolean lock : True(lock) or False(unlock)
++  **
++  ** Returns:         boolean : Return the Success or fail of the operation.
++  **                  Return "True" when operation is successful. else "False"
++  **
++  *******************************************************************************/
++  bool doLockT4tData(JNIEnv* e, jobject o, bool lock);
++  /*******************************************************************************
++  **
++  ** Function:        isLockedT4tData
++  **
++  ** Description:     Check Lock status of the T4T NDEF file.
++  **
++  ** Parameter:       NULL
++  **
++  ** Returns:         Return T4T NDEF lock status.
++  **                  Return "True" when T4T data is locked (un-writable).
++  **                  Otherwise, "False" shall be returned.
++  **
++  *******************************************************************************/
++  bool isLockedT4tData(JNIEnv* e, jobject o);
++  /*******************************************************************************
++  **
++  ** Function:        isNdefWritePermission
++  **
++  ** Description:     Read from config file for write permission
++  **
++  ** Parameter:       NULL
++  **
++  ** Returns:         Return T4T NDEF write permission status.
++  **                  Return "True" when T4T write permission allow to change.
++  **                  Otherwise, "False" shall be returned.
++  **
++  *******************************************************************************/
++  bool isNdefWritePermission();
++  /*******************************************************************************
++   **
++   ** Function:        isT4tNfceeBusy
++   **
++   ** Description:     Returns True if T4tNfcee operation is ongoing else false
++   **
++   ** Returns:         true/false
++   **
++   *******************************************************************************/
++  bool isT4tNfceeBusy(void);
++
++  /*******************************************************************************
++  **
++  ** Function:        t4tNfceeEventHandler
++  **
++  ** Description:     Handles callback events received from lower layer
++  **
++  ** Returns:         none
++  **
++  *******************************************************************************/
++  void eventHandler(uint8_t event, tNFA_CONN_EVT_DATA* eventData);
++  /*******************************************************************************
++  **
++  ** Function:        checkAndUpdateT4TAid
++  **
++  ** Description:     Check and update T4T Ndef Nfcee AID.
++  **
++  ** Returns:         void
++  **
++  *******************************************************************************/
++  void checkAndUpdateT4TAid(uint8_t* t4tAid, uint8_t* t4tNdefAidLen);
++
++ private:
++  bool mBusy;
++  static const int NXP_NFC_CLPARAM_ID_T4T_NFCEE = 0x95;
++  static const int NXP_NFC_CPARAM_ID_T4T_NFCEE = 0x10;
++  static const int NXP_NFC_NUM_PARAM_T4T_NFCEE = 0x02;
++  static const int NXP_PARAM_LEN_T4T_NFCEE = 0x01;
++  static const int MASK_T4T_FEATURE_BIT = 1;
++  static const int MASK_LOCK_BIT = 6;
++  static const int MASK_PROP_NDEF_FILE_BIT = 7;
++  static const int MAX_CONFIG_VALUE_LEN = 0x16;
++  static const int NXP_PARAM_GET_CONFIG_INDEX = 4;
++  static const int NXP_PARAM_GET_CONFIG_INDEX1 = 8;
++  static const int NXP_PARAM_SET_CONFIG_LEN = 0x09;
++  static const int NXP_PARAM_SET_CONFIG_PARAM = 0x02;
++  static NativeT4tNfcee sNativeT4tNfceeInstance;
++  static bool sIsNfcOffTriggered;
++  SyncEvent mT4tNfcOffEvent;
++  SyncEvent mT4tNfcEeRWEvent;
++  SyncEvent mT4tNfcEeWriteEvent;
++  SyncEvent mT4tNfcEeEvent;
++  SyncEvent mT4tNfcEeClrDataEvent;
++  tNFA_RX_DATA mReadData;
++  tNFA_STATUS mT4tOpStatus = NFA_STATUS_FAILED;
++  tNFA_STATUS mT4tNfcEeEventStat = NFA_STATUS_FAILED;
++  std::basic_string<uint8_t> sRxDataBuffer;
++  NativeT4tNfcee();
++
++  /*******************************************************************************
++  **
++  ** Function:        openConnection
++  **
++  ** Description:     Open T4T Nfcee Connection
++  **
++  ** Returns:         Status
++  **
++  *******************************************************************************/
++  tNFA_STATUS openConnection();
++
++  /*******************************************************************************
++  **
++  ** Function:        closeConnection
++  **
++  ** Description:     Close T4T Nfcee Connection
++  **
++  ** Returns:         Status
++  **
++  *******************************************************************************/
++  tNFA_STATUS closeConnection();
++
++/*******************************************************************************
++**
++** Function:        setup
++**
++** Description:     stops Discovery and opens T4TNFCEE connection
++**
++** Returns:         Status
++**
++*******************************************************************************/
++tNFA_STATUS setup(void);
++
++  /*******************************************************************************
++  **
++  ** Function:        cleanup
++  **
++  ** Description:     closes connection and starts discovery
++  **
++  ** Returns:         Status
++  **
++  *******************************************************************************/
++  void cleanup(void);
++
++  /*******************************************************************************
++  **
++  ** Function:        validatePreCondition
++  **
++  ** Description:     Runs precondition checks for requested operation
++  **
++  ** Returns:         Status
++  **
++  *******************************************************************************/
++  T4TNFCEE_STATUS_t validatePreCondition(T4TNFCEE_OPERATIONS_t op,
++                                         jbyteArray fileId,
++                                         jbyteArray data = nullptr);
++
++  /*******************************************************************************
++   **
++   ** Function:        setBusy
++   **
++   ** Description:     Sets busy flag indicating T4T operation is ongoing
++   **
++   ** Returns:         none
++   **
++   *******************************************************************************/
++  void setBusy();
++
++  /*******************************************************************************
++   **
++   ** Function:        resetBusy
++   **
++   ** Description:     Resets busy flag indicating T4T operation is completed
++   **
++   ** Returns:         none
++   **
++   *******************************************************************************/
++  void resetBusy();
++  /*******************************************************************************
++  **
++  ** Function:        getT4TNfceeAid
++  **
++  ** Description:     Get the T4T Nfcee AID.
++  **
++  ** Returns:         T4T AID: vector<uint8_t>
++  **
++  *******************************************************************************/
++  vector<uint8_t> getT4TNfceeAid();
++  /*******************************************************************************
++  **
++  ** Function:        isFwSupportNonStdT4TAid
++  **
++  ** Description:     Check FW supports Non-standard AID or not.
++  **
++  ** Returns:         true: FW support NON-STD AID
++  **                  false: FW not support NON-STD AID
++  **
++  *******************************************************************************/
++  bool isFwSupportNonStdT4TAid();
++};
++#endif
+diff --git a/nci/jni/NativeT4tNfceeManager.cpp b/nci/jni/NativeT4tNfceeManager.cpp
+new file mode 100644
+index 00000000..f11714ea
+--- /dev/null
++++ b/nci/jni/NativeT4tNfceeManager.cpp
+@@ -0,0 +1,138 @@
++/******************************************************************************
++ *
++ *  Copyright 2019,2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
++#if (NXP_EXTNS == TRUE)
++#include <android-base/stringprintf.h>
++#include <base/logging.h>
++#include <nativehelper/ScopedPrimitiveArray.h>
++#include "JavaClassConstants.h"
++#include "NativeT4tNfcee.h"
++#include "NfcJniUtil.h"
++extern bool nfc_debug_enabled;
++using android::base::StringPrintf;
++
++namespace android {
++/*******************************************************************************
++**
++** Function:        t4tClearData
++**
++** Description:     This API will set all the T4T NFCEE NDEF data to zero.
++**                  This API can be called regardless of NDEF file lock state.
++**
++** Returns:         boolean : Return the Success or fail of the operation.
++**                  Return "True" when operation is successful. else "False"
++**
++*******************************************************************************/
++jint t4tNfceeManager_doClearNdefT4tData(JNIEnv* e, jobject o) {
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", __func__);
++
++  return t4tNfcEe.t4tClearData(e, o);
++}
++/*******************************************************************************
++ **
++ ** Function:        nfcManager_doWriteT4tData
++ **
++ ** Description:     Write the data into the T4T file of the specific file ID
++ **
++ ** Returns:         Return the size of data written
++ **                  Return negative number of error code
++ **
++ *******************************************************************************/
++jint t4tNfceeManager_doWriteT4tData(JNIEnv* e, jobject o, jbyteArray fileId,
++                                    jbyteArray data, jint length) {
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", __func__);
++
++  return t4tNfcEe.t4tWriteData(e, o, fileId, data, length);
++}
++/*******************************************************************************
++**
++** Function:        nfcManager_doReadT4tData
++**
++** Description:     Read the data from the T4T file of the specific file ID.
++**
++** Returns:         byte[] : all the data previously written to the specific
++**                  file ID.
++**                  Return one byte '0xFF' if the data was never written to the
++**                  specific file ID,
++**                  Return null if reading fails.
++**
++*******************************************************************************/
++jbyteArray t4tNfceeManager_doReadT4tData(JNIEnv* e, jobject o,
++                                         jbyteArray fileId) {
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", __func__);
++  return t4tNfcEe.t4tReadData(e, o, fileId);
++}
++/*******************************************************************************
++**
++** Function:        t4tNfceeManager_doLockT4tData
++**
++** Description:     Lock/Unlock the data in the T4T NDEF file.
++**
++** Parameter:       boolean lock : True(lock) or False(unlock)
++**
++** Returns:         boolean : Return the Success or fail of the operation.
++**                  Return "True" when operation is successful. else "False"
++**
++*******************************************************************************/
++jboolean t4tNfceeManager_doLockT4tData(JNIEnv* e, jobject o, jboolean lock) {
++  return t4tNfcEe.doLockT4tData(e, o, lock);
++}
++/*******************************************************************************
++**
++** Function:        t4tNfceeManager_doLockT4tData
++**
++** Description:     Check Lock status of the T4T NDEF file.
++**
++** Parameter:       NULL
++**
++** Returns:         Return T4T NDEF lock status.
++**                  Return "True" when T4T data is locked (un-writable).
++**                  Otherwise, "False" shall be returned.
++**
++*******************************************************************************/
++jboolean t4tNfceeManager_isLockedT4tData(JNIEnv* e, jobject o) {
++  return t4tNfcEe.isLockedT4tData(e, o);
++}
++/*****************************************************************************
++ **
++ ** Description:     JNI functions
++ **
++ *****************************************************************************/
++static JNINativeMethod gMethods[] = {
++    {"doWriteT4tData", "([B[BI)I", (void*)t4tNfceeManager_doWriteT4tData},
++    {"doReadT4tData", "([B)[B", (void*)t4tNfceeManager_doReadT4tData},
++    {"doLockT4tData", "(Z)Z", (void*)t4tNfceeManager_doLockT4tData},
++    {"isLockedT4tData", "()Z", (void*)t4tNfceeManager_isLockedT4tData},
++    {"doClearNdefT4tData", "()Z", (void*)t4tNfceeManager_doClearNdefT4tData},
++};
++
++/*******************************************************************************
++ **
++ ** Function:        register_com_android_nfc_NativeT4tNfcee
++ **
++ ** Description:     Regisgter JNI functions with Java Virtual Machine.
++ **                  e: Environment of JVM.
++ **
++ ** Returns:         Status of registration.
++ **
++ *******************************************************************************/
++int register_com_android_nfc_NativeT4tNfcee(JNIEnv* e) {
++  return jniRegisterNativeMethods(e, gNativeT4tNfceeClassName, gMethods,
++                                  NELEM(gMethods));
++}
++}  // namespace android
++#endif
+diff --git a/nci/jni/NfcJniUtil.cpp b/nci/jni/NfcJniUtil.cpp
+index 93fff78a..c9a5e2ed 100644
+--- a/nci/jni/NfcJniUtil.cpp
++++ b/nci/jni/NfcJniUtil.cpp
+@@ -13,6 +13,25 @@
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
++/******************************************************************************
++ *
++ *  The original Work has been changed by NXP.
++ *
++ *  Copyright 2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
+ 
+ #include "NfcJniUtil.h"
+ 
+@@ -62,6 +81,8 @@ jint JNI_OnLoad(JavaVM* jvm, void*) {
+     return JNI_ERR;
+   if (RoutingManager::getInstance().registerJniFunctions(e) == -1)
+     return JNI_ERR;
++  if (android::register_com_android_nfc_NativeT4tNfcee(e) == -1)
++    return JNI_ERR;
+   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", __func__);
+   return JNI_VERSION_1_6;
+ }
+diff --git a/nci/jni/NfcJniUtil.h b/nci/jni/NfcJniUtil.h
+index 443c93fa..15fef3ad 100644
+--- a/nci/jni/NfcJniUtil.h
++++ b/nci/jni/NfcJniUtil.h
+@@ -13,12 +13,34 @@
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
++/******************************************************************************
++ *
++ *  The original Work has been changed by NXP.
++ *
++ *  Copyright 2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
+ 
+ #pragma once
+ #include <jni.h>
+ #include <pthread.h>
+ #include <semaphore.h>
+ #include <sys/queue.h>
++#if (NXP_EXTNS == TRUE)
++#include "Nxp_Features.h"
++#endif
+ 
+ /* Discovery modes -- keep in sync with NFCManager.DISCOVERY_MODE_* */
+ #define DISCOVERY_MODE_TAG_READER 0
+@@ -146,4 +168,5 @@ int register_com_android_nfc_NativeP2pDevice(JNIEnv* e);
+ int register_com_android_nfc_NativeLlcpConnectionlessSocket(JNIEnv* e);
+ int register_com_android_nfc_NativeLlcpServiceSocket(JNIEnv* e);
+ int register_com_android_nfc_NativeLlcpSocket(JNIEnv* e);
++int register_com_android_nfc_NativeT4tNfcee(JNIEnv *e);
+ }  // namespace android
+diff --git a/nci/jni/NfcTag.cpp b/nci/jni/NfcTag.cpp
+index e161e7f3..161bb16d 100755
+--- a/nci/jni/NfcTag.cpp
++++ b/nci/jni/NfcTag.cpp
+@@ -13,7 +13,23 @@
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
+-
++/******************************************************************************
++ *
++ *  Copyright 2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
+ /*
+  *  Tag-reading, tag-writing operations.
+  */
+@@ -407,7 +423,17 @@ void NfcTag::discoverTechnologies(tNFA_ACTIVATED& activationData) {
+     mTechList[mNumTechList] =
+         TARGET_TYPE_MIFARE_CLASSIC;  // is TagTechnology.MIFARE_CLASSIC by Java
+                                      // API
+-  } else {
++  } 
++  else if (NFC_PROTOCOL_T3BT == rfDetail.protocol) {
++    mTechHandles[mNumTechList] = rfDetail.rf_disc_id;
++    mTechLibNfcTypes[mNumTechList] = rfDetail.protocol;
++    mTechList[mNumTechList] =
++        TARGET_TYPE_ISO14443_3B;  // is TagTechnology.NFC_B by Java API
++    // save the stack's data structure for interpretation later
++    memcpy(&(mTechParams[mNumTechList]), &(rfDetail.rf_tech_param),
++           sizeof(rfDetail.rf_tech_param));
++  } 
++  else {
+     LOG(ERROR) << StringPrintf("%s: unknown protocol ????", fn);
+     mTechList[mNumTechList] = TARGET_TYPE_UNKNOWN;
+   }
+@@ -801,6 +827,13 @@ void NfcTag::fillNativeNfcTagMembers4(JNIEnv* e, jclass tag_cls, jobject tag,
+   ScopedLocalRef<jclass> byteArrayClass(e, e->GetObjectClass(actBytes.get()));
+   ScopedLocalRef<jobjectArray> techActBytes(
+       e, e->NewObjectArray(mNumTechList, byteArrayClass.get(), 0));
++  jobject gtechActBytesObject;
++  // Restore previously selected tag information from the gtechActBytes to
++  // techActBytes.
++  for (int j = 0; j < mTechListTail; j++) {
++    gtechActBytesObject = e->GetObjectArrayElement(gtechActBytes, j);
++    e->SetObjectArrayElement(techActBytes.get(), j, gtechActBytesObject);
++  }
+ 
+   // merging sak for combi tag
+   if (activationData.activate_ntf.protocol &
+@@ -818,16 +851,14 @@ void NfcTag::fillNativeNfcTagMembers4(JNIEnv* e, jclass tag_cls, jobject tag,
+       e->SetObjectArrayElement(techActBytes.get(), i, actBytes.get());
+     }
+   }
+-  jobject gtechActBytesObject;
++
+   if (mTechListTail == 0) {
++    // Keep the backup of the selected tag information to restore back with
++    // multi selection.
+     gtechActBytes =
+         reinterpret_cast<jobjectArray>(e->NewGlobalRef(techActBytes.get()));
+-  } else {
+-    for (int j = 0; j < mTechListTail; j++) {
+-      gtechActBytesObject = e->GetObjectArrayElement(gtechActBytes, j);
+-      e->SetObjectArrayElement(techActBytes.get(), j, gtechActBytesObject);
+-    }
+   }
++
+   for (int i = mTechListTail; i < mNumTechList; i++) {
+     DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: index=%d", fn, i);
+     if (NFC_PROTOCOL_T1T == mTechLibNfcTypes[i] ||
+@@ -991,10 +1022,25 @@ void NfcTag::fillNativeNfcTagMembers5(JNIEnv* e, jclass tag_cls, jobject tag,
+              NFC_DISCOVERY_TYPE_POLL_B_PRIME == mTechParams[0].mode ||
+              NFC_DISCOVERY_TYPE_LISTEN_B == mTechParams[0].mode ||
+              NFC_DISCOVERY_TYPE_LISTEN_B_PRIME == mTechParams[0].mode) {
+-    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: tech B", fn);
+-    uid.reset(e->NewByteArray(NFC_NFCID0_MAX_LEN));
+-    e->SetByteArrayRegion(uid.get(), 0, NFC_NFCID0_MAX_LEN,
++#if (NXP_EXTNS == TRUE)
++    if (activationData.activate_ntf.protocol != NFA_PROTOCOL_T3BT)
++#endif
++    {
++      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: tech B", fn);
++      uid.reset(e->NewByteArray(NFC_NFCID0_MAX_LEN));
++      e->SetByteArrayRegion(uid.get(), 0, NFC_NFCID0_MAX_LEN,
+                           (jbyte*)&mTechParams[0].param.pb.nfcid0);
++    }
++#if (NXP_EXTNS == TRUE)
++    else {
++      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: chinaId card", fn);
++      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++          "%s: pipi_id[0]=%x", fn, mTechParams[0].param.pb.pupiid[0]);
++      uid.reset(e->NewByteArray(NFC_PUPIID_MAX_LEN));
++      e->SetByteArrayRegion(uid.get(), 0, NFC_PUPIID_MAX_LEN,
++                            (jbyte*)&mTechParams[0].param.pb.pupiid);
++    }
++#endif
+   } else if (NFC_DISCOVERY_TYPE_POLL_F == mTechParams[0].mode ||
+              NFC_DISCOVERY_TYPE_POLL_F_ACTIVE == mTechParams[0].mode ||
+              NFC_DISCOVERY_TYPE_LISTEN_F == mTechParams[0].mode ||
+@@ -1062,20 +1108,20 @@ void NfcTag::selectP2p() {
+   static const char fn[] = "NfcTag::selectP2p";
+   uint8_t rfDiscoveryId = 0;
+ 
+-  for (int i = 0; i < mNumTechList; i++) {
++  for (int i = 0; i < mNumDiscTechList; i++) {
+     // if remote device does not support P2P, just skip it
+-    if (mTechLibNfcTypes[i] != NFA_PROTOCOL_NFC_DEP) continue;
++    if (mTechLibNfcTypesDiscData[i] != NFA_PROTOCOL_NFC_DEP) continue;
+ 
+     // if remote device supports tech F;
+     // tech F is preferred because it is faster than tech A
+     if ((mTechParams[i].mode == NFC_DISCOVERY_TYPE_POLL_F) ||
+         (mTechParams[i].mode == NFC_DISCOVERY_TYPE_POLL_F_ACTIVE)) {
+-      rfDiscoveryId = mTechHandles[i];
++      rfDiscoveryId = mTechHandlesDiscData[i];
+       break;  // no need to search further
+     } else if ((mTechParams[i].mode == NFC_DISCOVERY_TYPE_POLL_A) ||
+                (mTechParams[i].mode == NFC_DISCOVERY_TYPE_POLL_A_ACTIVE)) {
+       // only choose tech A if tech F is unavailable
+-      if (rfDiscoveryId == 0) rfDiscoveryId = mTechHandles[i];
++      if (rfDiscoveryId == 0) rfDiscoveryId = mTechHandlesDiscData[i];
+     }
+   }
+ 
+diff --git a/nci/jni/RoutingManager.cpp b/nci/jni/RoutingManager.cpp
+index 05de5ea6..c3ef17ea 100755
+--- a/nci/jni/RoutingManager.cpp
++++ b/nci/jni/RoutingManager.cpp
+@@ -13,6 +13,25 @@
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
++/******************************************************************************
++ *
++ *  The original Work has been changed by NXP.
++ *
++ *  Copyright 2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
+ 
+ /*
+  *  Manage the listen-mode routing table.
+@@ -336,6 +355,9 @@ bool RoutingManager::addAidRouting(const uint8_t* aid, uint8_t aidLen,
+   DLOG_IF(INFO, nfc_debug_enabled) << fn << ": enter";
+   uint8_t powerState = 0x01;
+   if (!mSecureNfcEnabled) {
++    /*masking lower 8 bits as power states will be available only in that
++     * region*/
++    power &= 0xFF;
+     if (power == 0x00) {
+       powerState = (route != 0x00) ? mOffHostAidRoutingPowerState : 0x11;
+     } else {
+diff --git a/nci/jni/RoutingManager.h b/nci/jni/RoutingManager.h
+index 9b998287..29447b05 100755
+--- a/nci/jni/RoutingManager.h
++++ b/nci/jni/RoutingManager.h
+@@ -13,6 +13,25 @@
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
++/******************************************************************************
++ *
++ *  The original Work has been changed by NXP.
++ *
++ *  Copyright 2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
+ 
+ /*
+  *  Manage the listen-mode routing table.
+@@ -47,6 +66,8 @@ class RoutingManager {
+   bool setNfcSecure(bool enable);
+   void updateRoutingTable();
+   void eeSetPwrAndLinkCtrl(uint8_t config);
++  static const int PWR_SWTCH_OFF_MASK = 0x02;
++  static const int PWR_BATT_OFF_MASK = 0x04;
+ 
+  private:
+   RoutingManager();
+diff --git a/nci/jni/extns/pn54x/inc/phNxpExtns.h b/nci/jni/extns/pn54x/inc/phNxpExtns.h
+index 17ee6aee..b6e29c38 100644
+--- a/nci/jni/extns/pn54x/inc/phNxpExtns.h
++++ b/nci/jni/extns/pn54x/inc/phNxpExtns.h
+@@ -13,7 +13,25 @@
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
+-
++/******************************************************************************
++ *
++ *  The original Work has been changed by NXP
++ *
++ *  Copyright 2020,2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
+ #ifndef _PHNXPEXTNS_H_
+ #define _PHNXPEXTNS_H_
+ 
+@@ -48,6 +66,7 @@ NFCSTATUS EXTNS_CheckMfcResponse(uint8_t** sTransceiveData,
+ void MfcPresenceCheckResult(NFCSTATUS status);
+ void MfcResetPresenceCheckStatus(void);
+ NFCSTATUS EXTNS_GetPresenceCheckStatus(void);
++void EXTNS_DebugAgcCfg(uint8_t rfState);
+ 
+ /*
+  * Events from JNI for NXP Extensions
+diff --git a/nci/jni/extns/pn54x/src/phNxpExtns.cpp b/nci/jni/extns/pn54x/src/phNxpExtns.cpp
+index 99f03c5f..eada3727 100644
+--- a/nci/jni/extns/pn54x/src/phNxpExtns.cpp
++++ b/nci/jni/extns/pn54x/src/phNxpExtns.cpp
+@@ -13,6 +13,25 @@
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
++/******************************************************************************
++ *
++ *  The original Work has been changed by NXP
++ *
++ *  Copyright 2020,2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
+ #ifdef ESE_NFC_SYNCHRONIZATION
+ #include <linux/ese-nfc-sync.h>
+ #endif
+@@ -96,6 +115,20 @@ void EXTNS_Close(void) {
+   return;
+ }
+ 
++/*******************************************************************************
++**
++** Function         EXTNS_GetStatus
++**
++** Description      This function Gets the Status of the Extns.
++**
++** Returns          None
++**
++*******************************************************************************/
++
++phNxpExtns_Status EXTNS_GetStatus(void) {
++  return gphNxpExtns_Context.Extns_status;
++}
++
+ /*******************************************************************************
+ **
+ ** Function         EXTNS_MfcCallBack
+diff --git a/nci/jni/extns/pn54x/src/phNxpExtns_DebugAgc.cpp b/nci/jni/extns/pn54x/src/phNxpExtns_DebugAgc.cpp
+new file mode 100644
+index 00000000..ce7c8e95
+--- /dev/null
++++ b/nci/jni/extns/pn54x/src/phNxpExtns_DebugAgc.cpp
+@@ -0,0 +1,312 @@
++/******************************************************************************
++ *
++ *  Copyright 2020,2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
++#include <android-base/stringprintf.h>
++#include <base/logging.h>
++#include <nfa_api.h>
++#include <phNxpExtns.h>
++#include <SyncEvent.h>
++#include "nfc_config.h"
++
++using android::base::StringPrintf;
++
++#if (NFC_AGC_DEBUG_FEATURE == TRUE)
++
++/* AGC Command Frame period in ms */
++#define NFC_AGC_INTERFRAME_PERIOD 500U
++#define NFC_AGC_RSSI_VAL_SIZE     0xFFU
++#define NFC_AGC_RESP_WAIT_TIME    1000U
++
++/*
++ * Extns module status
++ */
++
++typedef enum { EXTNS_STATUS_OPEN = 0, EXTNS_STATUS_CLOSE } phNxpExtns_Status;
++
++enum AgcState
++{
++    AgcStateOff = 0,
++    AgcStateStarted = 1,
++    AgcStateRunning = 2,
++    AgcStateStopped = 3,
++    AgcStateExit = AgcStateOff
++};
++
++typedef struct debugAgcEnable
++{
++    SyncEvent     debugAgcSyncEvt;
++    SyncEvent     debugAgcStopEvt;
++    tNFA_STATUS   debugAgcCmdStatus;
++    uint8_t       debugAgcRspData[NFC_AGC_RSSI_VAL_SIZE];
++    uint8_t       debugAgcRspLen;
++    AgcState      debugAgcState; // flag to indicate agc ongoing, running or stopped.
++    bool          debugAgcEnable; // config param
++}debugAgcEnable_t;
++
++static debugAgcEnable_t enableDebugAgc;
++static void *enableAgcThread(void *arg);
++void EXTNS_DebugAgcCfg(uint8_t rfState);
++static void setAgcProcessState(AgcState state);
++static AgcState getAgcProcessState();
++static tNFA_STATUS sendAgcDebugCmd();
++
++extern bool nfc_debug_enabled;
++
++extern phNxpExtns_Status EXTNS_GetStatus(void);
++
++/*******************************************************************************
++**
++** Function:        phNxpAgcDebug_Cfg
++**
++** Description:     Enable/Disable Dynamic RSSI feature.
++**
++** Returns:         None
++**
++*******************************************************************************/
++void EXTNS_DebugAgcCfg(uint8_t rfState)
++{
++    unsigned long enableAgcDebug = 0;
++    int retvalue = 0xFF;
++    enableAgcDebug = NfcConfig::getUnsigned(NAME_NXP_AGC_DEBUG_ENABLE, 0x00);
++    enableDebugAgc.debugAgcEnable = (bool) enableAgcDebug;
++    DLOG_IF(INFO, nfc_debug_enabled)
++        << StringPrintf("%s ,%lu:", __func__, enableAgcDebug);
++
++    if(EXTNS_STATUS_CLOSE == EXTNS_GetStatus())
++    {
++        SyncEventGuard guard(enableDebugAgc.debugAgcStopEvt);
++        enableDebugAgc.debugAgcStopEvt.notifyOne ();
++        return;
++    }
++
++    if(enableDebugAgc.debugAgcEnable && rfState )
++    {
++        if (getAgcProcessState() == AgcStateOff)
++        {
++            pthread_t agcThread;
++            pthread_attr_t attr;
++            pthread_attr_init(&attr);
++            pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
++            retvalue = pthread_create(&agcThread, &attr, enableAgcThread, NULL);
++            DLOG_IF(INFO, nfc_debug_enabled)
++                << StringPrintf("%s Status = 0x%X", __func__, retvalue);
++            pthread_attr_destroy(&attr);
++        }
++    }
++    else
++    {
++        if(!enableDebugAgc.debugAgcEnable)
++        {
++            DLOG_IF(INFO, nfc_debug_enabled)
++                << StringPrintf("%s AgcDebug not enabled", __func__);
++        }
++        else
++        {
++            SyncEventGuard syncGuard(enableDebugAgc.debugAgcSyncEvt);
++            enableDebugAgc.debugAgcSyncEvt.notifyOne ();
++            SyncEventGuard stopGuard(enableDebugAgc.debugAgcStopEvt);
++            enableDebugAgc.debugAgcStopEvt.notifyOne ();
++        }
++    }
++}
++
++void *enableAgcThread(void *arg)
++{
++    tNFA_STATUS status = NFA_STATUS_FAILED;
++
++    setAgcProcessState(AgcStateStarted);
++
++    while( getAgcProcessState())
++    {
++        if(getAgcProcessState() == AgcStateStopped)
++        {
++            break;
++        }
++
++        if(EXTNS_STATUS_CLOSE == EXTNS_GetStatus())
++        {
++            setAgcProcessState(AgcStateExit);
++            break;
++        }
++
++        status = sendAgcDebugCmd();
++        if(status == NFA_STATUS_OK)
++        {
++            DLOG_IF(INFO, nfc_debug_enabled)
++                << StringPrintf("%s:  enable success exit", __func__);
++        }
++#if 1
++        SyncEventGuard guard(enableDebugAgc.debugAgcStopEvt);
++        bool stopWait = enableDebugAgc.debugAgcStopEvt.wait(NFC_AGC_INTERFRAME_PERIOD);
++        if (stopWait)
++        {
++            setAgcProcessState(AgcStateExit);
++            break;
++        }
++#else
++        usleep((NFC_AGC_INTERFRAME_PERIOD*1000));
++#endif
++    }
++    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", __func__);
++    pthread_exit(NULL);
++    return NULL;
++}
++
++/*******************************************************************************
++ **
++ ** Function:       setAgcProcessState
++ **
++ ** Description:    sets the AGC process to stop
++ **
++ ** Returns:        None .
++ **
++ *******************************************************************************/
++void setAgcProcessState(AgcState state)
++{
++    enableDebugAgc.debugAgcState = state;
++}
++
++/*******************************************************************************
++ **
++ ** Function:       getAgcProcessState
++ **
++ ** Description:    returns the AGC process state.
++ **
++ ** Returns:        true/false .
++ **
++ *******************************************************************************/
++static AgcState getAgcProcessState()
++{
++    return enableDebugAgc.debugAgcState;
++}
++
++/*******************************************************************************
++ **
++ ** Function:        printDataByte()
++ **
++ ** Description:     Prints the AGC values
++ **
++ ** Returns:         success/failure
++ **
++ *******************************************************************************/
++static void printDataByte(uint16_t param_len, uint8_t *p_param)
++{
++    char print_buffer[param_len * 3 + 1];
++    memset (print_buffer, 0, sizeof(print_buffer));
++    for (int i = 3; i < param_len; i++)
++    {
++        snprintf(&print_buffer[i * 2], 3 ,"%02X", p_param[i]);
++    }
++    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++        "%s: AGC Dynamic RSSI values  = %s",__func__, print_buffer);
++}
++
++static void nfcManagerSetCbStatus(tNFA_STATUS status)
++{
++	enableDebugAgc.debugAgcCmdStatus = status;
++}
++
++static tNFA_STATUS nfcManagerGetCbStatus(void)
++{
++    return enableDebugAgc.debugAgcCmdStatus;
++}
++
++/*******************************************************************************
++ **
++ ** Function:        NxpResponse_EnableAGCDebug_Cb()
++ **
++ ** Description:     Cb to handle the response of AGC command
++ **
++ ** Returns:         success/failure
++ **
++ *******************************************************************************/
++static void nfcManagerAgcDebugCb(uint8_t event, uint16_t param_len, uint8_t *p_param)
++{
++    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++        "%s: Received length data = 0x%x",__func__, param_len);
++    if(param_len > 0)
++    {
++    	enableDebugAgc.debugAgcRspLen = param_len;
++        memcpy(enableDebugAgc.debugAgcRspData, p_param,
++                            enableDebugAgc.debugAgcRspLen);
++        nfcManagerSetCbStatus(NFA_STATUS_OK);
++    }
++    else
++    {
++        nfcManagerSetCbStatus(NFA_STATUS_FAILED);
++    }
++    SyncEventGuard guard(enableDebugAgc.debugAgcSyncEvt);
++    enableDebugAgc.debugAgcSyncEvt.notifyOne ();
++}
++
++
++/*******************************************************************************
++ **
++ ** Function:        sendAgcDebugCmd()
++ **
++ ** Description:     Sends the AGC Debug command.This enables dynamic RSSI
++ **                  look up table filling for different "TX RF settings" and enables
++ **                  MWdebug prints.
++ **
++ ** Returns:         success/failure
++ **
++ *******************************************************************************/
++static tNFA_STATUS sendAgcDebugCmd()
++{
++    tNFA_STATUS status = NFA_STATUS_FAILED;
++    uint8_t rssi_val_nci_1_0[] = {0x2F, 0x33, 0x04, 0x40, 0x00, 0x40, 0xD8};
++    uint8_t rssi_val_nci_2_0[] = {0x2F, 0x32, 0x01, 0x01};
++    uint8_t *get_rssi_val;
++    uint8_t rssi_cmd_length;
++
++    if(NFC_GetNCIVersion() == NCI_VERSION_1_0){
++        get_rssi_val = rssi_val_nci_1_0;
++        rssi_cmd_length = sizeof(rssi_val_nci_1_0);
++    }else{
++        get_rssi_val = rssi_val_nci_2_0;
++        rssi_cmd_length = sizeof(rssi_val_nci_2_0);
++    }
++
++    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++        "%s: Enter",__func__);
++    SyncEventGuard guard (enableDebugAgc.debugAgcSyncEvt);
++    nfcManagerSetCbStatus(NFA_STATUS_FAILED);
++	enableDebugAgc.debugAgcRspLen = 0;
++    memset(enableDebugAgc.debugAgcRspData, 0, NFC_AGC_RSSI_VAL_SIZE);
++    status = NFA_SendRawVsCommand(rssi_cmd_length, get_rssi_val, nfcManagerAgcDebugCb);
++    if (status == NFA_STATUS_OK)
++    {
++        DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++            "%s: Success NFA_SendRawVsCommand",__func__);
++        enableDebugAgc.debugAgcSyncEvt.wait(NFC_AGC_RESP_WAIT_TIME); /* wait for callback */
++    }
++    else
++    {    status = NFA_STATUS_FAILED;
++         DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++              "%s: Failed NFA_SendRawVsCommand", __func__);
++    }
++    status = nfcManagerGetCbStatus();
++    if(status == NFA_STATUS_OK && enableDebugAgc.debugAgcRspLen > 0)
++    {
++        printDataByte(enableDebugAgc.debugAgcRspLen, enableDebugAgc.debugAgcRspData);
++    }
++    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++        "%s: Exit",__func__);
++    return status;
++}
++
++#endif
+diff --git a/nci/src/com/android/nfc/dhimpl/NativeNfcManager.java b/nci/src/com/android/nfc/dhimpl/NativeNfcManager.java
+index 68917572..ffc90898 100755
+--- a/nci/src/com/android/nfc/dhimpl/NativeNfcManager.java
++++ b/nci/src/com/android/nfc/dhimpl/NativeNfcManager.java
+@@ -13,6 +13,25 @@
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
++/******************************************************************************
++ *
++ *  The original Work has been changed by NXP.
++ *
++ *  Copyright 2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
+ 
+ package com.android.nfc.dhimpl;
+ 
+@@ -51,6 +70,7 @@ public class NativeNfcManager implements DeviceHost {
+     private int mIsoDepMaxTransceiveLength;
+     private final DeviceHostListener mListener;
+     private final Context mContext;
++    private final NativeT4tNfceeManager mT4tNfceeMgr;
+ 
+     private final Object mLock = new Object();
+     private final HashMap<Integer, byte[]> mT3tIdentifiers = new HashMap<Integer, byte[]>();
+@@ -59,6 +79,7 @@ public class NativeNfcManager implements DeviceHost {
+         mListener = listener;
+         initializeNativeStructure();
+         mContext = context;
++        mT4tNfceeMgr = new NativeT4tNfceeManager();
+     }
+ 
+     public native boolean initializeNativeStructure();
+@@ -92,6 +113,9 @@ public class NativeNfcManager implements DeviceHost {
+ 
+     private native void doDisableDtaMode();
+ 
++    @Override
++    public native int   getT4TNfceePowerState();
++
+     @Override
+     public void disableDtaMode() {
+         Log.d(TAG, "disableDtaMode : entry");
+@@ -423,6 +447,31 @@ public class NativeNfcManager implements DeviceHost {
+     @Override
+     public native int getMaxRoutingTableSize();
+ 
++    @Override
++    public int doWriteT4tData(byte[] fileId, byte[] data, int length) {
++      return mT4tNfceeMgr.doWriteT4tData(fileId, data, length);
++    }
++
++    @Override
++    public byte[] doReadT4tData(byte[] fileId) {
++      return mT4tNfceeMgr.doReadT4tData(fileId);
++    }
++
++    @Override
++    public boolean doLockT4tData(boolean lock) {
++      return mT4tNfceeMgr.doLockT4tData(lock);
++    }
++
++    @Override
++    public boolean isLockedT4tData() {
++      return mT4tNfceeMgr.isLockedT4tData();
++    }
++
++    @Override
++    public boolean doClearNdefT4tData() {
++      return mT4tNfceeMgr.doClearNdefT4tData();
++    }
++
+     /** Notifies Ndef Message (TODO: rename into notifyTargetDiscovered) */
+     private void notifyNdefMessageListeners(NativeNfcTag tag) {
+         mListener.onRemoteEndpointDiscovered(tag);
+diff --git a/src/com/android/nfc/DeviceHost.java b/src/com/android/nfc/DeviceHost.java
+index 2ce617e6..a2c91d06 100644
+--- a/src/com/android/nfc/DeviceHost.java
++++ b/src/com/android/nfc/DeviceHost.java
+@@ -13,6 +13,25 @@
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
++/******************************************************************************
++ *
++ *  The original Work has been changed by NXP.
++ *
++ *  Copyright 2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
+ 
+ package com.android.nfc;
+ 
+@@ -214,6 +233,8 @@ public interface DeviceHost {
+ 
+     public int getLfT3tMax();
+ 
++    public int getT4TNfceePowerState();
++
+     public LlcpConnectionlessSocket createLlcpConnectionlessSocket(int nSap, String sn)
+             throws LlcpException;
+ 
+@@ -273,6 +294,16 @@ public interface DeviceHost {
+ 
+     public String getNfaStorageDir();
+ 
++	public int doWriteT4tData(byte[] fileId, byte[] data, int length);
++
++    public byte[] doReadT4tData(byte[] fileId);
++
++    public boolean doLockT4tData(boolean lock);
++
++    public boolean isLockedT4tData();
++
++    public boolean doClearNdefT4tData();
++	
+     /**
+     * Get the committed listen mode routing configuration
+     */
+diff --git a/src/com/android/nfc/NfcService.java b/src/com/android/nfc/NfcService.java
+index 6ab45a58..f32ea01c 100644
+--- a/src/com/android/nfc/NfcService.java
++++ b/src/com/android/nfc/NfcService.java
+@@ -13,6 +13,25 @@
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
++/******************************************************************************
++ *
++ *  The original Work has been changed by NXP.
++ *
++ *  Copyright 2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
+ 
+ package com.android.nfc;
+ 
+@@ -87,6 +106,10 @@ import android.util.EventLog;
+ import android.util.Log;
+ import android.util.proto.ProtoOutputStream;
+ import android.widget.Toast;
++import java.lang.reflect.Constructor;
++import java.lang.reflect.Field;
++import java.lang.reflect.Method;
++import java.lang.reflect.InvocationTargetException;
+ 
+ import com.android.internal.logging.MetricsLogger;
+ import com.android.internal.util.ArrayUtils;
+@@ -99,6 +122,8 @@ import com.android.nfc.DeviceHost.TagEndpoint;
+ import com.android.nfc.cardemulation.CardEmulationManager;
+ import com.android.nfc.dhimpl.NativeNfcManager;
+ import com.android.nfc.handover.HandoverDataParser;
++import com.nxp.nfc.INxpNfcAdapter;
++import com.nxp.nfc.NfcConstants;
+ 
+ import java.io.File;
+ import java.io.FileDescriptor;
+@@ -150,7 +175,7 @@ public class NfcService implements DeviceHostListener {
+     static final String NATIVE_LOG_FILE_NAME = "native_crash_logs";
+     static final String NATIVE_LOG_FILE_PATH = "/data/misc/nfc/logs";
+     static final int NATIVE_CRASH_FILE_SIZE = 1024 * 1024;
+-
++    static final String T4T_NFCEE_AID = "D2760000850101";
+     static final int MSG_NDEF_TAG = 0;
+     static final int MSG_LLCP_LINK_ACTIVATION = 1;
+     static final int MSG_LLCP_LINK_DEACTIVATED = 2;
+@@ -172,11 +197,13 @@ public class NfcService implements DeviceHostListener {
+     static final int MSG_PREFERRED_PAYMENT_CHANGED = 18;
+     static final int MSG_TOAST_DEBOUNCE_EVENT = 19;
+     static final int MSG_DELAY_POLLING = 20;
+-
+-    static final String MSG_ROUTE_AID_PARAM_TAG = "power";
++	static final int MSG_READ_T4TNFCEE = 67;
++	static final int MSG_WRITE_T4TNFCEE = 68;
+ 
+     // Negative value for NO polling delay
+     static final int NO_POLL_DELAY = -1;
++    private int ROUTE_ID_T4T_NFCEE = 0x10;
++    private int AID_MATCHING_EXACT_ONLY = 0x02;
+ 
+     // Update stats every 4 hours
+     static final long STATS_UPDATE_INTERVAL_MS = 4 * 60 * 60 * 1000;
+@@ -259,6 +286,10 @@ public class NfcService implements DeviceHostListener {
+     private final NfcUnlockManager mNfcUnlockManager;
+ 
+     private final BackupManager mBackupManager;
++    Class mNfcExtnsClass;
++    Object  mNfcExtnsObj;
++    Class mNfcExtraClass;
++    Object mNfcExtraObj;
+ 
+     // cached version of installed packages requesting Android.permission.NFC_TRANSACTION_EVENTS
+     // for current user and profiles. The Integer part is the userId.
+@@ -329,6 +360,7 @@ public class NfcService implements DeviceHostListener {
+     TagService mNfcTagService;
+     NfcAdapterService mNfcAdapter;
+     NfcDtaService mNfcDtaService;
++    NxpNfcAdapterService mNxpNfcAdapter;
+     RoutingTableParser mRoutingTableParser;
+     boolean mIsDebugBuild;
+     boolean mIsHceCapable;
+@@ -370,6 +402,10 @@ public class NfcService implements DeviceHostListener {
+     private final Set<INfcControllerAlwaysOnListener> mAlwaysOnListeners =
+             Collections.synchronizedSet(new HashSet<>());
+ 
++    public static final int T4TNFCEE_STATUS_FAILED = -1;
++    static final String MSG_ROUTE_AID_PARAM_TAG = "power";
++    private Object mT4tNfcEeObj = new Object();
++    private Bundle mT4tNfceeReturnBundle = new Bundle();
+     public static NfcService getInstance() {
+         return sService;
+     }
+@@ -482,6 +518,7 @@ public class NfcService implements DeviceHostListener {
+         mNfcAdapter = new NfcAdapterService();
+         mRoutingTableParser = new RoutingTableParser();
+         Log.i(TAG, "Starting NFC service");
++        mNxpNfcAdapter = new NxpNfcAdapterService();
+ 
+         sService = this;
+ 
+@@ -489,6 +526,21 @@ public class NfcService implements DeviceHostListener {
+         mContentResolver = mContext.getContentResolver();
+         mDeviceHost = new NativeNfcManager(mContext, this);
+ 
++        try {
++            Object[] objargs = new Object[] {mContext};
++            mNfcExtnsClass = Class.forName("com.android.nfc.NfcExtnsService");
++            Constructor mNfcConstr = mNfcExtnsClass.getDeclaredConstructor(Context.class);
++            mNfcExtnsObj   = mNfcConstr.newInstance(objargs);
++        } catch(ClassNotFoundException | IllegalAccessException e) {
++            Log.d(TAG, "NfcExtnsService not found");
++        } catch (InstantiationException e) {
++            Log.e(TAG, "NfcExtnsService object Instantaiation failed");
++        }   catch (NoSuchMethodException e ) {
++            Log.e(TAG, " NoSuchMethodException");
++        }  catch (InvocationTargetException e) {
++            Log.e(TAG, " InvocationTargetException");
++        }
++
+         mNfcUnlockManager = NfcUnlockManager.getInstance();
+ 
+         mHandoverDataParser = new HandoverDataParser();
+@@ -1251,6 +1303,18 @@ public class NfcService implements DeviceHostListener {
+             }
+         }
+ 
++	/**
++         * An interface for nxp extensions
++         */
++        @Override
++        public IBinder getNfcAdapterVendorInterface(String vendor) {
++            if(vendor.equalsIgnoreCase("nxp")) {
++                return (IBinder) mNxpNfcAdapter;
++            } else {
++                return null;
++            }
++        }
++
+         @Override
+         public boolean setNfcSecure(boolean enable) {
+             NfcPermissions.enforceAdminPermissions(mContext);
+@@ -1726,6 +1790,52 @@ public class NfcService implements DeviceHostListener {
+         }
+     }
+ 
++    final class NxpNfcAdapterService extends INxpNfcAdapter.Stub {
++
++        @Override
++        public int doWriteT4tData(byte[] fileId, byte[] data, int length) {
++          NfcPermissions.enforceUserPermissions(mContext);
++          Bundle writeBundle = new Bundle();
++          writeBundle.putByteArray("fileId", fileId);
++          writeBundle.putByteArray("writeData", data);
++          writeBundle.putInt("length", length);
++          try {
++            sendMessage(NfcService.MSG_WRITE_T4TNFCEE, writeBundle);
++            synchronized (mT4tNfcEeObj) {
++              mT4tNfcEeObj.wait(1000);
++            }
++          } catch (Exception e) {
++            e.printStackTrace();
++          }
++          /*return T4TNFCEE_STATUS_FAILED(-1) if readData not found.
++         This can happen in case of mT4tNfcEeObj timeout*/
++          int status = mT4tNfceeReturnBundle.getInt("writeStatus", T4TNFCEE_STATUS_FAILED);
++          mT4tNfceeReturnBundle.clear();
++          return status;
++        }
++
++        @Override
++        public byte[] doReadT4tData(byte[] fileId) {
++          NfcPermissions.enforceUserPermissions(mContext);
++          Bundle readBundle = new Bundle();
++          readBundle.putByteArray("fileId", fileId);
++          try {
++            sendMessage(NfcService.MSG_READ_T4TNFCEE, readBundle);
++            synchronized (mT4tNfcEeObj) {
++              mT4tNfcEeObj.wait(1000);
++            }
++          } catch (Exception e) {
++            e.printStackTrace();
++          }
++          /*getByteArray returns null if readData not found.
++          This can happen in case of mT4tNfcEeObj timeout*/
++          byte[] readData = mT4tNfceeReturnBundle.getByteArray("readData");
++          mT4tNfceeReturnBundle.clear();
++          return readData;
++        }
++
++    }
++
+     final class ReaderModeDeathRecipient implements IBinder.DeathRecipient {
+         @Override
+         public void binderDied() {
+@@ -2445,6 +2555,19 @@ public class NfcService implements DeviceHostListener {
+         return mDeviceHost.createLlcpServerSocket(sap, sn, miu, rw, linearBufferLength);
+     }
+ 
++    /**
++     * get default T4TNfcee power state supported
++     */
++    public int GetT4TNfceePowerState() {
++        int powerState = mDeviceHost.getT4TNfceePowerState();
++        if (mIsSecureNfcEnabled) {
++          /* Secure nfc on,Setting power state screen on unlocked */
++          powerState=0x01;
++        }
++        if (DBG) Log.d(TAG, "T4TNfceePowerState : " + powerState);
++        return powerState;
++    }
++
+     public int getAidRoutingTableSize ()
+     {
+         int aidTableSize = 0x00;
+@@ -2871,6 +2994,29 @@ public class NfcService implements DeviceHostListener {
+                 case MSG_TOAST_DEBOUNCE_EVENT:
+                     sToast_debounce = false;
+                     break;
++				
++				case MSG_WRITE_T4TNFCEE: {
++                    Bundle writeBundle = (Bundle) msg.obj;
++                    byte[] fileId = writeBundle.getByteArray("fileId");
++                    byte[] writeData = writeBundle.getByteArray("writeData");
++                    int length = writeBundle.getInt("length");
++                    int status = mDeviceHost.doWriteT4tData(fileId, writeData, length);
++                    mT4tNfceeReturnBundle.putInt("writeStatus", status);
++                    synchronized (mT4tNfcEeObj) {
++                        mT4tNfcEeObj.notify();
++                    }
++                        break;
++                    }
++                case MSG_READ_T4TNFCEE: {
++                        Bundle readBundle = (Bundle) msg.obj;
++                        byte[] fileId = readBundle.getByteArray("fileId");
++                        byte[] readData = mDeviceHost.doReadT4tData(fileId);
++                        mT4tNfceeReturnBundle.putByteArray("readData", readData);
++                        synchronized (mT4tNfcEeObj) {
++                            mT4tNfcEeObj.notify();
++                        }
++                        break;
++                    }
+ 
+                 case MSG_DELAY_POLLING:
+                     synchronized (NfcService.this) {
+@@ -3512,6 +3658,13 @@ public class NfcService implements DeviceHostListener {
+         }
+     }
+ 
++    public void addT4TNfceeAid() {
++      Log.i(TAG, "Add T4T Nfcee AID");
++      routeAids(T4T_NFCEE_AID, ROUTE_ID_T4T_NFCEE,
++              AID_MATCHING_EXACT_ONLY,
++              GetT4TNfceePowerState());
++    }
++
+     /**
+      * Dump debugging information as a NfcServiceDumpProto
+      *
+diff --git a/src/com/android/nfc/beam/BeamTransferManager.java b/src/com/android/nfc/beam/BeamTransferManager.java
+index d1f6e07b..e4e9f80b 100644
+--- a/src/com/android/nfc/beam/BeamTransferManager.java
++++ b/src/com/android/nfc/beam/BeamTransferManager.java
+@@ -14,6 +14,26 @@
+  * limitations under the License.
+  */
+ 
++/******************************************************************************
++ *
++ *  The original Work has been changed by NXP.
++ *
++ *  Copyright 2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
++
+ package com.android.nfc.beam;
+ 
+ import android.app.Notification;
+@@ -498,7 +518,7 @@ public class BeamTransferManager implements Handler.Callback,
+         intent.putExtra(BeamStatusReceiver.EXTRA_INCOMING, mIncoming ?
+                 BeamStatusReceiver.DIRECTION_INCOMING : BeamStatusReceiver.DIRECTION_OUTGOING);
+         PendingIntent pi = PendingIntent.getBroadcast(mContext, mTransferId, intent,
+-                PendingIntent.FLAG_ONE_SHOT);
++                PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE);
+ 
+         return pi;
+     }
+diff --git a/src/com/android/nfc/beam/SendUi.java b/src/com/android/nfc/beam/SendUi.java
+index 264d40e7..d36331e7 100644
+--- a/src/com/android/nfc/beam/SendUi.java
++++ b/src/com/android/nfc/beam/SendUi.java
+@@ -65,7 +65,6 @@ import android.widget.TextView;
+ import android.widget.Toast;
+ 
+ import com.android.internal.policy.PhoneWindow;
+-import com.android.internal.policy.SystemBarUtils;
+ import com.android.nfc.R;
+ 
+ /**
+@@ -360,7 +359,8 @@ public class SendUi implements Animator.AnimatorListener, View.OnTouchListener,
+         // Update display metrics
+         mDisplay.getRealMetrics(mDisplayMetrics);
+ 
+-        final int statusBarHeight = SystemBarUtils.getStatusBarHeight(mContext);
++        final int statusBarHeight = mContext.getResources().getDimensionPixelSize(
++                                        com.android.internal.R.dimen.status_bar_height);
+ 
+         mBlackLayer.setVisibility(View.GONE);
+         mBlackLayer.setAlpha(0f);
+@@ -592,7 +592,8 @@ public class SendUi implements Animator.AnimatorListener, View.OnTouchListener,
+     Bitmap createScreenshot() {
+         boolean hasNavBar =  mContext.getResources().getBoolean(
+                 com.android.internal.R.bool.config_showNavigationBar);
+-        final int statusBarHeight = SystemBarUtils.getStatusBarHeight(mContext);
++        final int statusBarHeight = mContext.getResources().getDimensionPixelSize(
++                                        com.android.internal.R.dimen.status_bar_height);
+ 
+         // Navbar has different sizes, depending on orientation
+         final int navBarHeight = hasNavBar ? mContext.getResources().getDimensionPixelSize(
+diff --git a/src/com/android/nfc/cardemulation/AidRoutingManager.java b/src/com/android/nfc/cardemulation/AidRoutingManager.java
+index 38e0af74..b1a638f2 100644
+--- a/src/com/android/nfc/cardemulation/AidRoutingManager.java
++++ b/src/com/android/nfc/cardemulation/AidRoutingManager.java
+@@ -13,6 +13,25 @@
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
++/******************************************************************************
++ *
++ *  The original Work has been changed by NXP.
++ *
++ *  Copyright 2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
+ package com.android.nfc.cardemulation;
+ 
+ import android.os.SystemProperties;
+@@ -242,12 +261,14 @@ public class AidRoutingManager {
+ 
+         synchronized (mLock) {
+             if (routeForAid.equals(mRouteForAid) && !force) {
+-                if (DBG) Log.d(TAG, "Routing table unchanged, not updating");
+-                return false;
++              NfcService.getInstance().addT4TNfceeAid();
++              if (DBG) Log.d(TAG, "Routing table unchanged, not updating");
++              return false;
+             }
+ 
+             // Otherwise, update internal structures and commit new routing
+             clearNfcRoutingTableLocked();
++            NfcService.getInstance().addT4TNfceeAid();
+             mRouteForAid = routeForAid;
+             mAidRoutingTable = aidRoutingTable;
+ 
+@@ -416,13 +437,9 @@ public class AidRoutingManager {
+                 int route = aidEntry.getValue().route;
+                 int aidType = aidEntry.getValue().aidInfo;
+                 String aid = aidEntry.getKey();
+-                int power = aidEntry.getValue().power;
+-                if (DBG) {
+-                    Log.d(TAG, "commit aid:" + aid + ",route:" + route
+-                        + ",aidtype:" + aidType + ", power state:" + power);
+-                }
++                if (DBG) Log.d (TAG, "commit aid:"+aid+"route:"+route+"aidtype:"+aidType);
+ 
+-                NfcService.getInstance().routeAids(aid, route, aidType, power);
++                NfcService.getInstance().routeAids(aid, route, aidType,0x01);
+             }
+         }
+ 
+diff --git a/src/com/android/nfc/dhimpl/NativeT4tNfceeManager.java b/src/com/android/nfc/dhimpl/NativeT4tNfceeManager.java
+new file mode 100644
+index 00000000..db01a838
+--- /dev/null
++++ b/src/com/android/nfc/dhimpl/NativeT4tNfceeManager.java
+@@ -0,0 +1,32 @@
++/******************************************************************************
++ *
++ *  Copyright 2019,2022 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
++package com.android.nfc.dhimpl;
++
++import com.android.nfc.DeviceHost;
++
++public class NativeT4tNfceeManager {
++  public native int doWriteT4tData(byte[] fileId, byte[] data, int length);
++
++  public native byte[] doReadT4tData(byte[] fileId);
++
++  public native boolean doLockT4tData(boolean lock);
++
++  public native boolean isLockedT4tData();
++
++  public native boolean doClearNdefT4tData();
++}
+\ No newline at end of file

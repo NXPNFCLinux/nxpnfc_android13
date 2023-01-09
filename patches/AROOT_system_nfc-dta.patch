@@ -1,0 +1,112 @@
+diff --git a/dtaLib/Android.bp b/dtaLib/Android.bp
+index 84f2c486..de3a6d82 100644
+--- a/dtaLib/Android.bp
++++ b/dtaLib/Android.bp
+@@ -40,8 +40,8 @@ cc_library_shared {
+         "system/nfc-dta/dtaPlatform/phInfra/inc",
+         "system/nfc-dta/dtaPlatform/phDtaOsal/inc",
+         "system/nfc-dta/dtaPlatform/phDtaOsal/src/comps/android/inc",
+-        "system/nfc/SN100x/src/gki/common/",
+-        "system/nfc/SN100x/src/gki/ulinux/",
++        "system/nfc/src/gki/common/",
++        "system/nfc/src/gki/ulinux/",
+     ],
+     local_include_dirs: [
+         "inc/",
+diff --git a/dtaMwAl/src/comps/android/Android.bp b/dtaMwAl/src/comps/android/Android.bp
+index ae61d161..0f72a24f 100644
+--- a/dtaMwAl/src/comps/android/Android.bp
++++ b/dtaMwAl/src/comps/android/Android.bp
+@@ -39,7 +39,7 @@ cc_library_shared {
+         "libc",
+         "libdl",
+         "liblog",
+-        "vendor.nxp.nxpnfc@2.0",
++        "vendor.nxp.nxpnfc@1.0",
+         "android.hardware.nfc@1.2",
+     ],
+     cflags: [
+@@ -65,12 +65,12 @@ cc_library_shared {
+         "system/nfc-dta/dtaPlatform/phInfra/inc",
+         "system/nfc-dta/dtaMwAl/inc",
+         "frameworks/native/include",
+-        "system/nfc/SN100x/src/include",
+-        "system/nfc/SN100x/src/nfa/include",
+-        "system/nfc/SN100x/src/nfc/include",
+-        "system/nfc/SN100x/src/gki/ulinux",
+-        "system/nfc/SN100x/src/gki/common",
+-        "system/nfc/SN100x/utils/include",
++        "system/nfc/src/include",
++        "system/nfc/src/nfa/include",
++        "system/nfc/src/nfc/include",
++        "system/nfc/src/gki/ulinux",
++        "system/nfc/src/gki/common",
++        "system/nfc/utils/include",
+         "frameworks/base/media/mca/filterfw/native/base",
+     ],
+     local_include_dirs: [
+diff --git a/dtaPlatform/phDtaOsal/src/comps/android/Android.bp b/dtaPlatform/phDtaOsal/src/comps/android/Android.bp
+index 02b8d020..2323d720 100644
+--- a/dtaPlatform/phDtaOsal/src/comps/android/Android.bp
++++ b/dtaPlatform/phDtaOsal/src/comps/android/Android.bp
+@@ -41,12 +41,12 @@ cc_library_shared {
+         "system/nfc-dta/dtaPlatform/phInfra/inc",
+         "system/nfc-dta/dtaPlatform/phDtaOsal/src/comps/android/inc",
+         "system/nfc-dta/dtaPlatform/phDtaOsal/inc",
+-        "system/nfc/SN100x/src/include",
+-        "system/nfc/SN100x/src/nfa/include",
+-        "system/nfc/SN100x/src/nfc/include",
+-        "system/nfc/SN100x/src/gki/ulinux",
+-        "system/nfc/SN100x/src/gki/common",
+-        "system/nfc/SN100x/utils/include",
++        "system/nfc/src/include",
++        "system/nfc/src/nfa/include",
++        "system/nfc/src/nfc/include",
++        "system/nfc/src/gki/ulinux",
++        "system/nfc/src/gki/common",
++        "system/nfc/utils/include",
+     ],
+ 
+     srcs: [
+diff --git a/dtaUI/dtaGui/src/comps/android/jni/Android.bp b/dtaUI/dtaGui/src/comps/android/jni/Android.bp
+index ad8968b8..29ac6e74 100644
+--- a/dtaUI/dtaGui/src/comps/android/jni/Android.bp
++++ b/dtaUI/dtaGui/src/comps/android/jni/Android.bp
+@@ -37,8 +37,8 @@ cc_library_shared {
+         "system/nfc-dta/dtaPlatform/phDtaOsal/inc",
+         "system/nfc-dta/dtaPlatform/phDtaOsal/src/comps/android/inc",
+         "system/nfc-dta/dtaMwAl/inc/",
+-        "system/nfc/SN100x/src/gki/common/",
+-        "system/nfc/SN100x/src/gki/ulinux/",
++        "system/nfc/src/gki/common/",
++        "system/nfc/src/gki/ulinux/",
+     ],
+     srcs: ["*.cpp"],
+ 
+diff --git a/dtaUI/dtaGui/src/comps/android/ui/Android.bp b/dtaUI/dtaGui/src/comps/android/ui/Android.bp
+index c8338aff..8ecc0300 100644
+--- a/dtaUI/dtaGui/src/comps/android/ui/Android.bp
++++ b/dtaUI/dtaGui/src/comps/android/ui/Android.bp
+@@ -27,7 +27,6 @@ android_app {
+         "src/**/*.java",
+     ],
+ 
+-    libs: ["com.nxp.nfc"],
+ 
+     static_libs: [
+         "android-support-v4",
+diff --git a/dtaUI/dtaGui/src/comps/android/ui/AndroidManifest.xml b/dtaUI/dtaGui/src/comps/android/ui/AndroidManifest.xml
+index 8531f7a6..cc7c3d12 100644
+--- a/dtaUI/dtaGui/src/comps/android/ui/AndroidManifest.xml
++++ b/dtaUI/dtaGui/src/comps/android/ui/AndroidManifest.xml
+@@ -83,10 +83,6 @@
+         </intent-filter>
+     </service>
+ 
+-    <uses-library android:name="com.nxp.nfc"
+-            android:required="true"
+-        />
+-
+     </application>
+ 
+ </manifest>
