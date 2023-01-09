@@ -22,6 +22,8 @@ cd $ANDROID_BUILD_TOP/hardware/interfaces
 patch -p1 <$ANDROID_BUILD_TOP/vendor/nxp/nfc/patches/AROOT_hardware_interfaces.patch
 cd $ANDROID_BUILD_TOP/system/core
 patch -p1 <$ANDROID_BUILD_TOP/vendor/nxp/nfc/patches/AROOT_system_core.patch
+cd $ANDROID_BUILD_TOP/system/logging
+patch -p1 <$ANDROID_BUILD_TOP/vendor/nxp/nfc/patches/AROOT_system_logging.patch
 cd $ANDROID_BUILD_TOP
 
 echo
