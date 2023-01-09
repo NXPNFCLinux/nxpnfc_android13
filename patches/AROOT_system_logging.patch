@@ -1,0 +1,13 @@
+diff --git a/liblog/logger_write.cpp b/liblog/logger_write.cpp
+index 9a9a126b..46aad970 100644
+--- a/liblog/logger_write.cpp
++++ b/liblog/logger_write.cpp
+@@ -54,7 +54,7 @@
+ 
+ using android::base::ErrnoRestorer;
+ 
+-#define LOG_BUF_SIZE 1024
++#define LOG_BUF_SIZE 2048
+ 
+ #if defined(__ANDROID__)
+ static int check_log_uid_permissions() {
