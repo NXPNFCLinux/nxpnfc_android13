@@ -1411,13 +1411,13 @@ index e57c302..8991a74 100644
 + ******************************************************************************/
 +void phNxpNciHal_txNfccClockSetCmd(void);
 diff --git a/pn8x/halimpl/hal/phNxpNciHal_ext.cc b/pn8x/halimpl/hal/phNxpNciHal_ext.cc
-index 6918228..f3b1dcd 100644
+index 6918228..9c35ea0 100644
 --- a/pn8x/halimpl/hal/phNxpNciHal_ext.cc
 +++ b/pn8x/halimpl/hal/phNxpNciHal_ext.cc
 @@ -1,5 +1,5 @@
  /*
 - * Copyright 2012-2021 NXP
-+ * Copyright 2012-2022 NXP
++ * Copyright 2012-2023 NXP
   *
   * Licensed under the Apache License, Version 2.0 (the "License");
   * you may not use this file except in compliance with the License.
@@ -1434,9 +1434,26 @@ index 6918228..f3b1dcd 100644
  static uint8_t ee_disc_done = 0x00;
  uint8_t EnableP2P_PrioLogic = false;
  extern bool bEnableMfcExtns;
-@@ -96,7 +98,11 @@ NFCSTATUS phNxpNciHal_process_ext_rsp(uint8_t* p_ntf, uint16_t* p_len) {
-   NFCSTATUS status = NFCSTATUS_SUCCESS;
+@@ -66,7 +68,13 @@ static void hal_extns_write_rsp_timeout_cb(uint32_t TimerId, void* pContext);
+  */
+ #define PROPRIETARY_CMD_FELICA_READER_MODE 0xFE
+ static uint8_t gFelicaReaderMode;
++static uint8_t rf_discovery_idle[] = {0x21, 0x06, 0x01, 0x00}; /* IDLE */
++static uint8_t rf_discovery_emvco_cmd[] = {0x21, 0x03, 0x05, 0x02, 0x00,
++                                            0x01, 0x01, 0x01}; /* RF_DISCOVER */
  
++static NFCSTATUS phNxpNciHal_emvco_start_polling_loop(void);
++static NFCSTATUS phNxpNciHal_emvco_stop_polling_loop(void);
++int emvco_discover_type = 0xFF;
+ static NFCSTATUS phNxpNciHal_ext_process_nfc_init_rsp(uint8_t* p_ntf,
+                                                       uint16_t* p_len);
+ /*******************************************************************************
+@@ -94,9 +102,13 @@ void phNxpNciHal_ext_init(void) {
+ *******************************************************************************/
+ NFCSTATUS phNxpNciHal_process_ext_rsp(uint8_t* p_ntf, uint16_t* p_len) {
+   NFCSTATUS status = NFCSTATUS_SUCCESS;
+-
++  NXPLOG_NCIHAL_D("phNxpNciHal_process_ext_rsp");
    if (p_ntf[0] == 0x61 && p_ntf[1] == 0x05 && *p_len < 14) {
 -    if (*p_len <= 6) {
 +    if ((nfcFL.chipType == pn548C2) && (nfcdep_detected)) {
@@ -1447,7 +1464,29 @@ index 6918228..f3b1dcd 100644
        android_errorWriteLog(0x534e4554, "118152591");
      }
      NXPLOG_NCIHAL_E("RF_INTF_ACTIVATED_NTF length error!");
-@@ -171,6 +177,9 @@ NFCSTATUS phNxpNciHal_process_ext_rsp(uint8_t* p_ntf, uint16_t* p_len) {
+@@ -112,6 +124,21 @@ NFCSTATUS phNxpNciHal_process_ext_rsp(uint8_t* p_ntf, uint16_t* p_len) {
+     NXPLOG_NCIHAL_D("Nfc-Dep Detect in EmvCo profile - Restart polling");
+   }
+ 
++  if ((p_ntf[0] == 0x61 && p_ntf[1] == 0x06 &&
++    p_ntf[2] == 0x02 && p_ntf[2] == 0x03 &&
++    p_ntf[2] == 0x02 && nxpprofile_ctrl.profile_type == EMV_CO_PROFILE)
++    || (p_ntf[0] == 0x60 &&
++    p_ntf[1] == 0x08 && p_ntf[2] == 0x02 &&
++    p_ntf[3] == 0xB2 && p_ntf[4] == 0x00 &&
++    nxpprofile_ctrl.profile_type == EMV_CO_PROFILE)) {
++    NXPLOG_NCIHAL_E("RF_LINK_LOSS in EMVCO work around form MW!");
++    status = phNxpNciHal_emvco_stop_polling_loop();
++    if(status == NFCSTATUS_SUCCESS) {
++          usleep(10 * 1000);
++          phNxpNciHal_emvco_start_polling_loop();
++    }
++  }
++
+   if (p_ntf[0] == 0x61 && p_ntf[1] == 0x05 && p_ntf[4] == 0x01 &&
+       p_ntf[5] == 0x05 && p_ntf[6] == 0x02 && gFelicaReaderMode) {
+     /*If FelicaReaderMode is enabled,Change Protocol to T3T from NFC-DEP
+@@ -171,6 +198,9 @@ NFCSTATUS phNxpNciHal_process_ext_rsp(uint8_t* p_ntf, uint16_t* p_len) {
          break;
        case 0x03:
          NXPLOG_NCIHAL_D("NxpNci: RF Interface = NFC-DEP");
@@ -1457,7 +1496,7 @@ index 6918228..f3b1dcd 100644
          break;
        case 0x80:
          NXPLOG_NCIHAL_D("NxpNci: RF Interface = MIFARE");
-@@ -372,6 +381,12 @@ NFCSTATUS phNxpNciHal_process_ext_rsp(uint8_t* p_ntf, uint16_t* p_len) {
+@@ -372,6 +402,12 @@ NFCSTATUS phNxpNciHal_process_ext_rsp(uint8_t* p_ntf, uint16_t* p_len) {
        *p_len = 5;
      }
    }
@@ -1470,7 +1509,7 @@ index 6918228..f3b1dcd 100644
  
    if (*p_len == 4 && p_ntf[0] == 0x61 && p_ntf[1] == 0x07) {
      unsigned long rf_update_enable = 0;
-@@ -486,6 +501,14 @@ static NFCSTATUS phNxpNciHal_ext_process_nfc_init_rsp(uint8_t* p_ntf,
+@@ -486,6 +522,14 @@ static NFCSTATUS phNxpNciHal_ext_process_nfc_init_rsp(uint8_t* p_ntf,
        }
        NXPLOG_NCIHAL_D("CORE_RESET_NTF received !");
        NXPLOG_NCIR_E("len = %3d > %s", *p_len, print_buffer);
@@ -1485,7 +1524,30 @@ index 6918228..f3b1dcd 100644
        phNxpNciHal_emergency_recovery();
        status = NFCSTATUS_FAILED;
      } /* Parsing CORE_INIT_RSP*/
-@@ -745,9 +768,11 @@ NFCSTATUS phNxpNciHal_write_ext(uint16_t* cmd_len, uint8_t* p_cmd_data,
+@@ -544,6 +588,22 @@ static NFCSTATUS phNxpNciHal_process_ext_cmd_rsp(uint16_t cmd_len,
+ 
+   nxpncihal_ctrl.ext_cb_data.status = NFCSTATUS_SUCCESS;
+ 
++  if (p_cmd[0] == 0x20 && p_cmd[1] == 0x02 &&
++             p_cmd[2] == 0x05 && p_cmd[3] == 0x01 &&
++             p_cmd[4] == 0xA0 && p_cmd[5] == 0x44 &&
++             p_cmd[6] == 0x01 && p_cmd[7] == 0x01) {
++    nxpprofile_ctrl.profile_type = EMV_CO_PROFILE;
++    NXPLOG_NCIHAL_D("EMV_CO_PROFILE mode - Enabled");
++    status = NFCSTATUS_SUCCESS;
++  } else if (p_cmd[0] == 0x20 && p_cmd[1] == 0x02 &&
++             p_cmd[2] == 0x05 && p_cmd[3] == 0x01 &&
++             p_cmd[4] == 0xA0 && p_cmd[5] == 0x44 &&
++             p_cmd[6] == 0x01 && p_cmd[7] == 0x00) {
++    NXPLOG_NCIHAL_D("NFC_FORUM_PROFILE mode - Enabled");
++    nxpprofile_ctrl.profile_type = NFC_FORUM_PROFILE;
++    status = NFCSTATUS_SUCCESS;
++  }
++
+   /* Send ext command */
+   data_written = phNxpNciHal_write_unlocked(cmd_len, p_cmd);
+   if (data_written != cmd_len) {
+@@ -745,9 +805,11 @@ NFCSTATUS phNxpNciHal_write_ext(uint16_t* cmd_len, uint8_t* p_cmd_data,
           p_cmd_data[4] == 0x24 || p_cmd_data[4] == 0x27 ||
           p_cmd_data[4] == 0x28 || p_cmd_data[4] == 0x29 ||
           p_cmd_data[4] == 0x2a)) {
@@ -1499,7 +1561,7 @@ index 6918228..f3b1dcd 100644
  
      if (p_cmd_data[3] == 0x20 || p_cmd_data[3] == 0x24 ||
          p_cmd_data[3] == 0x60) {
-@@ -758,6 +783,10 @@ NFCSTATUS phNxpNciHal_write_ext(uint16_t* cmd_len, uint8_t* p_cmd_data,
+@@ -758,6 +820,10 @@ NFCSTATUS phNxpNciHal_write_ext(uint16_t* cmd_len, uint8_t* p_cmd_data,
      NXPLOG_NCIHAL_D("> Polling Loop Started");
      icode_detected = 0;
      icode_send_eof = 0;
@@ -1510,7 +1572,7 @@ index 6918228..f3b1dcd 100644
    }
    // 22000100
    else if (p_cmd_data[0] == 0x22 && p_cmd_data[1] == 0x00 &&
-@@ -912,6 +941,53 @@ NFCSTATUS phNxpNciHal_write_ext(uint16_t* cmd_len, uint8_t* p_cmd_data,
+@@ -912,6 +978,53 @@ NFCSTATUS phNxpNciHal_write_ext(uint16_t* cmd_len, uint8_t* p_cmd_data,
      }
    }
  
@@ -1564,6 +1626,122 @@ index 6918228..f3b1dcd 100644
    return status;
  }
  
+@@ -981,3 +1094,114 @@ static void hal_extns_write_rsp_timeout_cb(uint32_t timerId, void* pContext) {
+ 
+   return;
+ }
++/*******************************************************************************
++ **
++ ** Function         emvco_rf_timout_handler_thread
++ **
++ ** Description      Thread to execute emvco_rf_timout_handler_thread commands.
++ **
++ ** Returns          None
++ **
++ *******************************************************************************/
++void* emvco_rf_timout_handler_thread(void* tmp) {
++  NFCSTATUS status = NFCSTATUS_SUCCESS;
++  uint16_t data_len;
++  NXPLOG_NCIHAL_W("emvco_rf_timout_handler_thread: enter type=0x0%x", *((int*)tmp));
++  usleep(10 * 1000);
++
++  switch (*((int*)tmp)) {
++    case START_POLLING: {
++      NXPLOG_NCIHAL_W("emvco_rf_timout_handler_thread  STOP_POLLING enter");
++      CONCURRENCY_LOCK();
++      data_len = phNxpNciHal_write_unlocked(sizeof(rf_discovery_idle),
++                                            rf_discovery_idle);
++      NXPLOG_NCIHAL_W("emvco_rf_timout_handler_thread  STOP_POLLING exit");
++      CONCURRENCY_UNLOCK();
++
++      if (data_len != sizeof(rf_discovery_idle)) {
++        NXPLOG_NCIHAL_E("phNxpNciHal_stop_emvco__polling_loop: data len mismatch");
++        status = NFCSTATUS_FAILED;
++      }
++      NXPLOG_NCIHAL_W("emvco_rf_timout_handler_thread  START_POLLING enter");
++      CONCURRENCY_LOCK();
++      data_len = phNxpNciHal_write_unlocked(sizeof(rf_discovery_emvco_cmd), rf_discovery_emvco_cmd);
++      NXPLOG_NCIHAL_W("emvco_rf_timout_handler_thread  START_POLLING exit");
++      CONCURRENCY_UNLOCK();
++
++      if (data_len != sizeof(rf_discovery_emvco_cmd)) {
++        NXPLOG_NCIHAL_E("phNxpNciHal_start_emvco_polling_loop: data len mismatch");
++        status = NFCSTATUS_FAILED;
++      }
++    } break;
++
++    case STOP_POLLING: {
++      NXPLOG_NCIHAL_W("emvco_rf_timout_handler_thread  STOP_POLLING enter");
++      CONCURRENCY_LOCK();
++      data_len = phNxpNciHal_write_unlocked(sizeof(rf_discovery_idle),
++                                            rf_discovery_idle);
++      NXPLOG_NCIHAL_W("emvco_rf_timout_handler_thread  STOP_POLLING exit");
++      CONCURRENCY_UNLOCK();
++
++      if (data_len != sizeof(rf_discovery_idle)) {
++        NXPLOG_NCIHAL_E("phNxpNciHal_stop_emvco__polling_loop: data len mismatch");
++        status = NFCSTATUS_FAILED;
++      }
++    } break;
++
++    default:
++      NXPLOG_NCIHAL_E("No Matching case");
++      status = NFCSTATUS_FAILED;
++      break;
++  }
++
++  NXPLOG_NCIHAL_W("emvco_rf_timout_handler_thread: exit");
++  return NULL;
++}
++/*******************************************************************************
++**
++** Function         phNxpNciHal_emvco_start_polling_loop
++**
++** Description      Sends start polling cmd to NFCC
++**
++** Returns          NFCSTATUS_SUCCESS if successful,otherwise NFCSTATUS_FAILED
++**
++*******************************************************************************/
++NFCSTATUS phNxpNciHal_emvco_start_polling_loop() {
++  NFCSTATUS status = NFCSTATUS_FAILED;
++  //phNxpNciHal_Sem_t cb_data;
++  pthread_t pthread;
++  emvco_discover_type = START_POLLING;
++
++  pthread_attr_t attr;
++  pthread_attr_init(&attr);
++  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
++  if (pthread_create(&pthread, &attr, emvco_rf_timout_handler_thread, (void*)&emvco_discover_type) != 0) {
++    NXPLOG_NCIHAL_E("fail to create pthread");
++  }
++  pthread_attr_destroy(&attr);
++  return status;
++}
++/*******************************************************************************
++**
++** Function         phNxpNciHal_stop_polling_loop
++**
++** Description      Sends stop polling cmd to NFCC
++**
++** Returns          NFCSTATUS_SUCCESS if successful,otherwise NFCSTATUS_FAILED
++**
++*******************************************************************************/
++static NFCSTATUS phNxpNciHal_emvco_stop_polling_loop() {
++  NFCSTATUS status = NFCSTATUS_SUCCESS;
++  //phNxpNciHal_Sem_t cb_data;
++  pthread_t pthread;
++  emvco_discover_type = STOP_POLLING;
++
++  pthread_attr_t attr;
++  pthread_attr_init(&attr);
++  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
++  if (pthread_create(&pthread, &attr, emvco_rf_timout_handler_thread, (void*)&emvco_discover_type) != 0) {
++    NXPLOG_NCIHAL_E("fail to create pthread");
++  }
++  pthread_attr_destroy(&attr);
++  return status;
++}
+\ No newline at end of file
 diff --git a/pn8x/halimpl/libnfc-nxp-PN548AD_example.conf b/pn8x/halimpl/libnfc-nxp-PN548AD_example.conf
 index 53121b2..00ae0b0 100755
 --- a/pn8x/halimpl/libnfc-nxp-PN548AD_example.conf
