@@ -812,7 +812,7 @@ index 000000000..ce57abfb5
 +#endif  // ANDROID_HARDWARE_HAL_NXPNFC_V1_0_H
 +#endif  // NXP_EXTNS
 diff --git a/src/include/nci_defs.h b/src/include/nci_defs.h
-index 355f095e4..7b08a8520 100644
+index 355f095e4..5123df1a4 100644
 --- a/src/include/nci_defs.h
 +++ b/src/include/nci_defs.h
 @@ -16,6 +16,25 @@
@@ -822,7 +822,7 @@ index 355f095e4..7b08a8520 100644
 +/******************************************************************************
 +
 + *
-+ *  Copyright 2022 NXP
++ *  Copyright 2022-2023 NXP
 + *
 + *  Licensed under the Apache License, Version 2.0 (the "License");
 + *  you may not use this file except in compliance with the License.
@@ -869,7 +869,7 @@ index 355f095e4..7b08a8520 100644
  
  /* Keep the NCI configuration and perform NCI initialization. */
  #define NCI_RESET_TYPE_KEEP_CFG 0x00
-@@ -355,6 +379,14 @@ typedef uint8_t tNCI_INTF_TYPE;
+@@ -355,7 +379,23 @@ typedef uint8_t tNCI_INTF_TYPE;
  #define NCI_PROTOCOL_T5T 0x06
  #define NCI_PROTOCOL_ISO_DEP 0x04
  #define NCI_PROTOCOL_NFC_DEP 0x05
@@ -882,8 +882,17 @@ index 355f095e4..7b08a8520 100644
 +#endif
 +#endif
  
++/**********************************************
++ * Proprietary Protocols
++ **********************************************/
++#if (NXP_EXTNS == TRUE)
++#ifndef NCI_PROTOCOL_T3BT
++#define NCI_PROTOCOL_T3BT 0x8b
++#endif
++#endif
  /* Discovery Types/Detected Technology and Mode */
  #define NCI_DISCOVERY_TYPE_POLL_A 0x00
+ #define NCI_DISCOVERY_TYPE_POLL_B 0x01
 diff --git a/src/include/nci_defs_extns.h b/src/include/nci_defs_extns.h
 new file mode 100755
 index 000000000..a1d45ad28
@@ -952,7 +961,7 @@ index 000000000..a1d45ad28
 +  P2P_LINK_LOSS_RF_LINK_LOSS_ERR
 +};
 diff --git a/src/include/nfc_config.h b/src/include/nfc_config.h
-index 62e47be31..1c7beddbc 100644
+index 62e47be31..2dcf47252 100644
 --- a/src/include/nfc_config.h
 +++ b/src/include/nfc_config.h
 @@ -13,6 +13,25 @@
@@ -963,7 +972,7 @@ index 62e47be31..1c7beddbc 100644
 + *
 + *  The original Work has been changed by NXP
 + *
-+ *  Copyright 2020,2022 NXP
++ *  Copyright 2020,2022-2023 NXP
 + *
 + *  Licensed under the Apache License, Version 2.0 (the "License");
 + *  you may not use this file except in compliance with the License.
@@ -981,7 +990,7 @@ index 62e47be31..1c7beddbc 100644
  #pragma once
  
  #include <string>
-@@ -59,6 +78,12 @@
+@@ -59,6 +78,14 @@
  #define NAME_ISO_DEP_MAX_TRANSCEIVE "ISO_DEP_MAX_TRANSCEIVE"
  #define NAME_DEVICE_HOST_ALLOW_LIST "DEVICE_HOST_ALLOW_LIST"
  #define NAME_DEFAULT_ISODEP_ROUTE "DEFAULT_ISODEP_ROUTE"
@@ -990,6 +999,8 @@ index 62e47be31..1c7beddbc 100644
 +#define NAME_NXP_T4T_NFCEE_ENABLE "NXP_T4T_NFCEE_ENABLE"
 +#define NAME_NXP_T4T_NDEF_NFCEE_AID "NXP_T4T_NDEF_NFCEE_AID"
 +#define NAME_DEFAULT_T4TNFCEE_AID_POWER_STATE "DEFAULT_T4TNFCEE_AID_POWER_STATE"
++#define NAME_NXP_NON_STD_CARD_TIMEDIFF "NXP_NON_STD_CARD_TIMEDIFF"
++#define NAME_NXP_SUPPORT_NON_STD_CARD "NXP_SUPPORT_NON_STD_CARD"
 +#endif
  
  class NfcConfig {
@@ -1127,7 +1138,7 @@ index 55ad70be4..8462ba2c8 100644
          "NFA_CeSetIsoDepListenTech: Invalid technology mask");
      return (NFA_STATUS_INVALID_PARAM);
 diff --git a/src/nfa/dm/nfa_dm_act.cc b/src/nfa/dm/nfa_dm_act.cc
-index 51c841dd8..892b8c708 100644
+index 51c841dd8..2066e35ec 100644
 --- a/src/nfa/dm/nfa_dm_act.cc
 +++ b/src/nfa/dm/nfa_dm_act.cc
 @@ -16,6 +16,25 @@
@@ -1137,7 +1148,7 @@ index 51c841dd8..892b8c708 100644
 +/******************************************************************************
 +
 + *
-+ *  Copyright 2022 NXP
++ *  Copyright 2022-2023 NXP
 + *
 + *  Licensed under the Apache License, Version 2.0 (the "License");
 + *  you may not use this file except in compliance with the License.
@@ -1233,7 +1244,21 @@ index 51c841dd8..892b8c708 100644
              /* Notify NFA tag sub-system */
              nfa_rw_proc_disc_evt(NFA_DM_RF_DISC_ACTIVATED_EVT, p_data, false);
            } else /* if NFC-DEP, ISO-DEP with frame interface or others */
-@@ -1675,7 +1720,11 @@ static void nfa_dm_poll_disc_cback(tNFA_DM_RF_DISC_EVT event,
+@@ -1630,7 +1675,12 @@ static void nfa_dm_poll_disc_cback(tNFA_DM_RF_DISC_EVT event,
+                    (nfa_dm_cb.disc_cb.activated_protocol ==
+                     NFC_PROTOCOL_KOVIO) ||
+                    (nfa_dm_cb.disc_cb.activated_protocol ==
+-                    NFC_PROTOCOL_MIFARE)) {
++                    NFC_PROTOCOL_MIFARE)
++#if(NXP_EXTNS == TRUE)
++                    ||
++                   (nfa_dm_cb.disc_cb.activated_protocol == NFC_PROTOCOL_T3BT)
++#endif
++) {
+           /* Notify NFA tag sub-system */
+           nfa_rw_proc_disc_evt(NFA_DM_RF_DISC_ACTIVATED_EVT, p_data, true);
+         } else /* if NFC-DEP/ISO-DEP with frame interface */
+@@ -1675,7 +1725,11 @@ static void nfa_dm_poll_disc_cback(tNFA_DM_RF_DISC_EVT event,
              (p_data->deactivate.type == NFC_DEACTIVATE_TYPE_SLEEP_AF)) {
            evt_data.deactivated.type = NFA_DEACTIVATE_TYPE_SLEEP;
          } else {
@@ -1245,7 +1270,7 @@ index 51c841dd8..892b8c708 100644
          }
          /* notify deactivation to application */
          nfa_dm_conn_cback_event_notify(NFA_DEACTIVATED_EVT, &evt_data);
-@@ -1755,8 +1804,14 @@ void nfa_dm_notify_activation_status(tNFA_STATUS status,
+@@ -1755,8 +1809,14 @@ void nfa_dm_notify_activation_status(tNFA_STATUS status,
          p_nfcid = p_params->t1t.uid;
          evt_data.activated.activate_ntf.rf_tech_param.param.pa.nfcid1_len =
              nfcid_len;
@@ -1260,7 +1285,7 @@ index 51c841dd8..892b8c708 100644
        } else {
          nfcid_len = p_tech_params->param.pa.nfcid1_len;
          p_nfcid = p_tech_params->param.pa.nfcid1;
-@@ -1764,6 +1819,21 @@ void nfa_dm_notify_activation_status(tNFA_STATUS status,
+@@ -1764,6 +1824,21 @@ void nfa_dm_notify_activation_status(tNFA_STATUS status,
      } else if (p_tech_params->mode == NFC_DISCOVERY_TYPE_POLL_B) {
        nfcid_len = NFC_NFCID0_MAX_LEN;
        p_nfcid = p_tech_params->param.pb.nfcid0;
@@ -1746,7 +1771,7 @@ index 2ee1e0384..8a415409a 100644
      case NFA_EE_RECOVERY_INIT:
        /*NFCEE recovery in progress*/
 diff --git a/src/nfa/include/nfa_api.h b/src/nfa/include/nfa_api.h
-index b94f45efe..37b90c1f5 100755
+index b94f45efe..29fc1d6c3 100755
 --- a/src/nfa/include/nfa_api.h
 +++ b/src/nfa/include/nfa_api.h
 @@ -16,6 +16,25 @@
@@ -1756,7 +1781,7 @@ index b94f45efe..37b90c1f5 100755
 +/******************************************************************************
 +
 + *
-+ *  Copyright 2022 NXP
++ *  Copyright 2022-2023 NXP
 + *
 + *  Licensed under the Apache License, Version 2.0 (the "License");
 + *  you may not use this file except in compliance with the License.
@@ -2217,7 +2242,7 @@ index 42d846447..4a9f99b4a 100644
    NFA_ID_MAX
  };
 diff --git a/src/nfa/rw/nfa_rw_act.cc b/src/nfa/rw/nfa_rw_act.cc
-index 4721b681a..7be5d4bc0 100644
+index 4721b681a..a7c77c3bd 100644
 --- a/src/nfa/rw/nfa_rw_act.cc
 +++ b/src/nfa/rw/nfa_rw_act.cc
 @@ -16,6 +16,25 @@
@@ -2227,7 +2252,7 @@ index 4721b681a..7be5d4bc0 100644
 +/******************************************************************************
 +
 + *
-+ *  Copyright 2022 NXP
++ *  Copyright 2022-2023 NXP
 + *
 + *  Licensed under the Apache License, Version 2.0 (the "License");
 + *  you may not use this file except in compliance with the License.
@@ -2276,52 +2301,75 @@ index 4721b681a..7be5d4bc0 100644
        nfa_rw_command_complete();
        nfa_rw_cb.cur_op = NFA_RW_OP_MAX;
        break;
-@@ -1394,6 +1424,24 @@ static void nfa_rw_handle_i93_evt(tRW_EVENT event, tRW_DATA* p_rw_data) {
-       break;
+@@ -1486,6 +1516,33 @@ static void nfa_rw_handle_mfc_evt(tRW_EVENT event, tRW_DATA* p_rw_data) {
    }
  }
+ 
 +#if (NXP_EXTNS == TRUE)
-+static void nfa_rw_handle_t3bt_evt(tRW_EVENT event, __attribute__((unused)) tRW_DATA* p_rw_data) {
-+
-+  // tNFC_ACTIVATE_DEVT *activate_ntf =
-+  // (tNFC_ACTIVATE_DEVT*)nfa_dm_cb.p_activate_ntf;
-+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("nfa_rw_handle_t3bt_evt:");
++/*******************************************************************************
++**
++** Function         nfa_rw_handle_t3bt_evt
++**
++** Description      Handler for T3BT tag events
++**
++** Returns          Nothing
++**
++*******************************************************************************/
++static void nfa_rw_handle_t3bt_evt(tRW_EVENT event, __attribute__((unused))tRW_DATA* p_rw_data) {
++  DLOG_IF(INFO, nfc_debug_enabled)
++        << StringPrintf("nfa_rw_handle_t3bt_evt:");
 +
 +  switch (event) {
 +    case RW_T3BT_RAW_READ_CPLT_EVT:
 +      nfa_rw_command_complete();
 +      break;
 +    default:
-+      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("nfa_rw_handle_t3bt_evt: default event");
++      DLOG_IF(INFO, nfc_debug_enabled)
++        << StringPrintf("nfa_rw_handle_t3bt_evt: default event");
 +      break;
 +  }
 +  nfa_dm_notify_activation_status(NFA_STATUS_OK, nullptr);
 +}
 +#endif
- 
++
  /*******************************************************************************
  **
-@@ -1515,7 +1563,14 @@ static void nfa_rw_cback(tRW_EVENT event, tRW_DATA* p_rw_data) {
+ ** Function         nfa_rw_cback
+@@ -1515,10 +1572,18 @@ static void nfa_rw_cback(tRW_EVENT event, tRW_DATA* p_rw_data) {
    } else if (event < RW_I93_MAX_EVT) {
      /* Handle ISO 15693 tag events */
      nfa_rw_handle_i93_evt(event, p_rw_data);
 -  } else if (event < RW_MFC_MAX_EVT) {
 +  } 
++  else if (event < RW_MFC_MAX_EVT) {
+     /* Handle Mifare Classic tag events */
+     nfa_rw_handle_mfc_evt(event, p_rw_data);
+-  } else {
++  }
 +#if (NXP_EXTNS == TRUE)
 +  else if (event < RW_T3BT_MAX_EVT) {
 +    /* Handle ISO 14443-3B tag events */
 +    nfa_rw_handle_t3bt_evt(event, p_rw_data);
 +  }
 +#endif
-+  else if (event < RW_MFC_MAX_EVT) {
-     /* Handle Mifare Classic tag events */
-     nfa_rw_handle_mfc_evt(event, p_rw_data);
-   } else {
-@@ -2339,6 +2394,20 @@ static bool nfa_rw_t3t_get_system_codes() {
++ else {
+     LOG(ERROR) << StringPrintf("nfa_rw_cback: unhandled event=0x%02x", event);
+   }
+ }
+@@ -2339,6 +2404,29 @@ static bool nfa_rw_t3t_get_system_codes() {
    return true;
  }
  
 +#if (NXP_EXTNS == TRUE)
++/*******************************************************************************
++**
++** Function         nfa_rw_t3bt_get_pupi
++**
++** Description      Get PUPI of T3BT tag
++**
++** Returns          TRUE (message buffer to be freed by caller)
++**
++*******************************************************************************/
 +static bool nfa_rw_t3bt_get_pupi(__attribute__((unused)) tNFA_RW_MSG* p_data) {
 +  tNFC_STATUS status;
 +
@@ -2338,7 +2386,7 @@ index 4721b681a..7be5d4bc0 100644
  /*******************************************************************************
  **
  ** Function         nfa_rw_i93_command
-@@ -2368,7 +2437,11 @@ static bool nfa_rw_i93_command(tNFA_RW_MSG* p_data) {
+@@ -2368,7 +2456,11 @@ static bool nfa_rw_i93_command(tNFA_RW_MSG* p_data) {
  
      case NFA_RW_OP_I93_STAY_QUIET:
        i93_command = I93_CMD_STAY_QUIET;
@@ -2350,7 +2398,7 @@ index 4721b681a..7be5d4bc0 100644
        break;
  
      case NFA_RW_OP_I93_READ_SINGLE_BLOCK:
-@@ -2583,7 +2656,11 @@ bool nfa_rw_activate_ntf(tNFA_RW_MSG* p_data) {
+@@ -2583,7 +2675,11 @@ bool nfa_rw_activate_ntf(tNFA_RW_MSG* p_data) {
      if ((p_activate_params->protocol != NFA_PROTOCOL_T1T) &&
          (p_activate_params->protocol != NFA_PROTOCOL_T2T) &&
          (p_activate_params->protocol != NFA_PROTOCOL_T3T) &&
@@ -2363,7 +2411,7 @@ index 4721b681a..7be5d4bc0 100644
        nfa_rw_cb.protocol = NFA_PROTOCOL_INVALID;
      }
    } else if (p_activate_params->intf_param.type == NCI_INTERFACE_ISO_DEP) {
-@@ -2655,17 +2732,41 @@ bool nfa_rw_activate_ntf(tNFA_RW_MSG* p_data) {
+@@ -2655,17 +2751,41 @@ bool nfa_rw_activate_ntf(tNFA_RW_MSG* p_data) {
      memcpy(tag_params.t2t.uid, p_activate_params->rf_tech_param.param.pa.nfcid1,
             p_activate_params->rf_tech_param.param.pa.nfcid1_len);
    } else if (NFC_PROTOCOL_T3T == nfa_rw_cb.protocol) {
@@ -2411,7 +2459,7 @@ index 4721b681a..7be5d4bc0 100644
      /* Delay notifying upper layer of NFA_ACTIVATED_EVT to retrieve additional
       * tag infomation */
      nfa_rw_cb.flags |= NFA_RW_FL_ACTIVATION_NTF_PENDING;
-@@ -2978,7 +3079,11 @@ bool nfa_rw_handle_op_req(tNFA_RW_MSG* p_data) {
+@@ -2978,7 +3098,11 @@ bool nfa_rw_handle_op_req(tNFA_RW_MSG* p_data) {
      case NFA_RW_OP_I93_SET_ADDR_MODE:
        nfa_rw_i93_command(p_data);
        break;
@@ -2424,7 +2472,7 @@ index 4721b681a..7be5d4bc0 100644
      default:
        LOG(ERROR) << StringPrintf("nfa_rw_handle_api: unhandled operation: %i",
                                   p_data->op_req.op);
-@@ -3170,3 +3275,18 @@ void nfa_rw_command_complete(void) {
+@@ -3170,3 +3294,18 @@ void nfa_rw_command_complete(void) {
    /* Restart presence_check timer */
    nfa_rw_check_start_presence_check_timer(NFA_RW_PRESENCE_CHECK_INTERVAL);
  }
@@ -3710,7 +3758,7 @@ index 000000000..1feadf64b
 +}
 +#endif
 diff --git a/src/nfc/include/nfc_api.h b/src/nfc/include/nfc_api.h
-index 145bbf0d0..c50fbb971 100644
+index 145bbf0d0..8cd5a13ea 100644
 --- a/src/nfc/include/nfc_api.h
 +++ b/src/nfc/include/nfc_api.h
 @@ -16,6 +16,25 @@
@@ -3772,7 +3820,7 @@ index 145bbf0d0..c50fbb971 100644
  /* 0xE0 ~0xFF are proprietary status codes */
  /* Command started successfully                     */
  #define NFC_STATUS_CMD_STARTED 0xE3
-@@ -385,6 +421,9 @@ extern uint8_t NFC_GetNCIVersion();
+@@ -385,9 +421,16 @@ extern uint8_t NFC_GetNCIVersion();
  /* NFCDEP/LLCP - NFC-A or NFC-F       */
  #define NFC_PROTOCOL_NFC_DEP NCI_PROTOCOL_NFC_DEP
  #define NFC_PROTOCOL_MIFARE NCI_PROTOCOL_MIFARE
@@ -3782,7 +3830,14 @@ index 145bbf0d0..c50fbb971 100644
  #define NFC_PROTOCOL_ISO15693 NCI_PROTOCOL_15693
  #define NFC_PROTOCOL_B_PRIME NCI_PROTOCOL_B_PRIME
  #define NFC_PROTOCOL_KOVIO NCI_PROTOCOL_KOVIO
-@@ -566,11 +605,18 @@ typedef tNFC_STATUS tNFC_START_DEVT;
++
++#if (NXP_EXTNS == TRUE)
++#define NFC_PROTOCOL_T3BT NCI_PROTOCOL_T3BT
++#endif
+ typedef uint8_t tNFC_PROTOCOL;
+ 
+ /* Discovery Types/Detected Technology and Mode */
+@@ -566,11 +609,18 @@ typedef tNFC_STATUS tNFC_START_DEVT;
  typedef tNCI_RF_PA_PARAMS tNFC_RF_PA_PARAMS;
  #define NFC_MAX_SENSB_RES_LEN NCI_MAX_SENSB_RES_LEN
  #define NFC_NFCID0_MAX_LEN 4
@@ -3801,7 +3856,7 @@ index 145bbf0d0..c50fbb971 100644
  } tNFC_RF_PB_PARAMS;
  
  #define NFC_MAX_SENSF_RES_LEN NCI_MAX_SENSF_RES_LEN
-@@ -809,6 +855,10 @@ typedef void(tNFC_CONN_CBACK)(uint8_t conn_id, tNFC_CONN_EVT event,
+@@ -809,6 +859,10 @@ typedef void(tNFC_CONN_CBACK)(uint8_t conn_id, tNFC_CONN_EVT event,
  /* the static connection ID for HCI transport */
  #define NFC_HCI_CONN_ID 1
  
@@ -3812,7 +3867,7 @@ index 145bbf0d0..c50fbb971 100644
  /*****************************************************************************
  **  EXTERNAL FUNCTION DECLARATIONS
  *****************************************************************************/
-@@ -1051,6 +1101,22 @@ extern tNFC_STATUS NFC_ConnClose(uint8_t conn_id);
+@@ -1051,6 +1105,22 @@ extern tNFC_STATUS NFC_ConnClose(uint8_t conn_id);
  *******************************************************************************/
  extern void NFC_SetStaticRfCback(tNFC_CONN_CBACK* p_cback);
  
@@ -3836,7 +3891,7 @@ index 145bbf0d0..c50fbb971 100644
  **
  ** Function         NFC_SetReassemblyFlag
 diff --git a/src/nfc/include/rw_api.h b/src/nfc/include/rw_api.h
-index 242b56851..1c7dcec34 100644
+index 242b56851..902fe9fbb 100644
 --- a/src/nfc/include/rw_api.h
 +++ b/src/nfc/include/rw_api.h
 @@ -16,6 +16,25 @@
@@ -3846,7 +3901,7 @@ index 242b56851..1c7dcec34 100644
 +/******************************************************************************
 +
 + *
-+ *  Copyright 2022 NXP
++ *  Copyright 2022-2023 NXP
 + *
 + *  Licensed under the Apache License, Version 2.0 (the "License");
 + *  you may not use this file except in compliance with the License.
@@ -3865,28 +3920,19 @@ index 242b56851..1c7dcec34 100644
  /******************************************************************************
   *
   *  This file contains the Near Field Communication (NFC) Reader/Writer mode
-@@ -36,6 +55,9 @@
- #define RW_T3T_FIRST_EVT 0x60
- #define RW_T4T_FIRST_EVT 0x80
- #define RW_I93_FIRST_EVT 0xA0
+@@ -140,6 +159,11 @@ enum {
+   RW_MFC_RAW_FRAME_EVT,  /* Response of raw frame sent               */
+   RW_MFC_INTF_ERROR_EVT, /* RF Interface error event                 */
+   RW_MFC_MAX_EVT
 +#if (NXP_EXTNS == TRUE)
-+#define RW_T3BT_FIRST_EVT 0xB0
++  ,
++  RW_T3BT_RAW_READ_CPLT_EVT,   /* T3BT Raw Read Command Complete Evt */
++  RW_T3BT_MAX_EVT              /* Max Evt Number for T3BT tag*/
 +#endif
- #define RW_MFC_FIRST_EVT 0xC0
+ };
  
- enum {
-@@ -124,6 +146,10 @@ enum {
-   RW_I93_RAW_FRAME_EVT,        /* Response of raw frame sent         */
-   RW_I93_INTF_ERROR_EVT,       /* RF Interface error event           */
-   RW_I93_MAX_EVT,
-+#if (NXP_EXTNS == TRUE)
-+  RW_T3BT_RAW_READ_CPLT_EVT,
-+  RW_T3BT_MAX_EVT,
-+#endif
- 
-   /* Mifare Classic tag events for tRW_CBACK */
-   RW_MFC_NDEF_DETECT_EVT =
-@@ -275,6 +301,10 @@ typedef union {
+ #define RW_RAW_FRAME_EVT 0xFF
+@@ -275,6 +299,10 @@ typedef union {
  
  typedef void(tRW_CBACK)(tRW_EVENT event, tRW_DATA* p_data);
  
@@ -3897,7 +3943,7 @@ index 242b56851..1c7dcec34 100644
  /*******************************************************************************
  **
  ** Function         RW_T1tRid
-@@ -1367,6 +1397,9 @@ extern tNFC_STATUS RW_SendRawFrame(uint8_t* p_raw_data, uint16_t data_len);
+@@ -1367,6 +1395,9 @@ extern tNFC_STATUS RW_SendRawFrame(uint8_t* p_raw_data, uint16_t data_len);
  *******************************************************************************/
  extern tNFC_STATUS RW_SetActivatedTagType(tNFC_ACTIVATE_DEVT* p_activate_params,
                                            tRW_CBACK* p_cback);
@@ -3907,7 +3953,27 @@ index 242b56851..1c7dcec34 100644
  /*******************************************************************************
  **
  ** Function         RW_MfcDetectNDef
-@@ -1428,4 +1461,138 @@ extern tNFC_STATUS RW_MfcFormatNDef(void);
+@@ -1397,6 +1428,19 @@ extern tNFC_STATUS RW_MfcDetectNDef(void);
+ *******************************************************************************/
+ extern tNFC_STATUS RW_MfcReadNDef(uint8_t* p_buffer, uint16_t buf_len);
+ 
++#if (NXP_EXTNS == TRUE)
++/*******************************************************************************
++**
++** Function         RW_T3BtGetPupiID
++**
++** Description      This function gets the PUPI ID of T3BT tag.
++**
++** Returns          tNFC_STATUS
++**
++*******************************************************************************/
++extern tNFC_STATUS RW_T3BtGetPupiID();
++
++#endif
+ /*****************************************************************************
+ **
+ ** Function         RW_MfcFormatNDef
+@@ -1428,4 +1472,138 @@ extern tNFC_STATUS RW_MfcFormatNDef(void);
  *******************************************************************************/
  extern tNFC_STATUS RW_MfcWriteNDef(uint16_t buf_len, uint8_t* p_buffer);
  
@@ -4572,7 +4638,7 @@ index abd8bbef6..2c923f0f2 100644
 +}
 +#endif
 diff --git a/src/nfc/tags/rw_t4t.cc b/src/nfc/tags/rw_t4t.cc
-index e5d3ef21c..ce1c541aa 100644
+index e5d3ef21c..df456fb59 100644
 --- a/src/nfc/tags/rw_t4t.cc
 +++ b/src/nfc/tags/rw_t4t.cc
 @@ -16,6 +16,25 @@
@@ -4582,7 +4648,7 @@ index e5d3ef21c..ce1c541aa 100644
 +/******************************************************************************
 +
 + *
-+ *  Copyright 2022 NXP
++ *  Copyright 2022-2023 NXP
 + *
 + *  Licensed under the Apache License, Version 2.0 (the "License");
 + *  you may not use this file except in compliance with the License.
@@ -4624,7 +4690,7 @@ index e5d3ef21c..ce1c541aa 100644
  /* sub state */
  /* waiting for response of selecting AID    */
  #define RW_T4T_SUBSTATE_WAIT_SELECT_APP 0x00
-@@ -89,6 +115,10 @@ extern unsigned char appl_dta_mode_flag;
+@@ -89,6 +115,15 @@ extern unsigned char appl_dta_mode_flag;
  #define RW_T4T_SUBSTATE_WAIT_CREATE_NDEF 0x0E
  #define RW_T4T_SUBSTATE_WAIT_WRITE_CC 0x0F
  #define RW_T4T_SUBSTATE_WAIT_WRITE_NDEF 0x10
@@ -4632,10 +4698,15 @@ index e5d3ef21c..ce1c541aa 100644
 +#define RW_T3BT_SUBSTATE_WAIT_GET_ATTRIB 0x11
 +#define RW_T3BT_SUBSTATE_WAIT_GET_PUPI 0x12
 +#endif
++
++#if (NXP_EXTNS == TRUE)
++#define RW_T3BT_SUBSTATE_WAIT_GET_ATTRIB 0x11
++#define RW_T3BT_SUBSTATE_WAIT_GET_PUPI 0x12
++#endif
  
  static std::string rw_t4t_get_state_name(uint8_t state);
  static std::string rw_t4t_get_sub_state_name(uint8_t sub_state);
-@@ -111,6 +141,10 @@ static bool rw_t4t_create_ccfile(void);
+@@ -111,6 +146,10 @@ static bool rw_t4t_create_ccfile(void);
  static bool rw_t4t_create_ndef(void);
  static bool rw_t4t_write_cc(void);
  static bool rw_t4t_write_ndef(void);
@@ -4646,7 +4717,7 @@ index e5d3ef21c..ce1c541aa 100644
  static void rw_t4t_handle_error(tNFC_STATUS status, uint8_t sw1, uint8_t sw2);
  static void rw_t4t_sm_detect_ndef(NFC_HDR* p_r_apdu);
  static void rw_t4t_sm_read_ndef(NFC_HDR* p_r_apdu);
-@@ -130,7 +164,11 @@ static void rw_t4t_sm_ndef_format(NFC_HDR* p_r_apdu);
+@@ -130,7 +169,11 @@ static void rw_t4t_sm_ndef_format(NFC_HDR* p_r_apdu);
  **
  *******************************************************************************/
  static bool rw_t4t_send_to_lower(NFC_HDR* p_c_apdu) {
@@ -4659,11 +4730,20 @@ index e5d3ef21c..ce1c541aa 100644
      LOG(ERROR) << StringPrintf("failed");
      return false;
    }
-@@ -752,6 +790,35 @@ static bool rw_t4t_write_ndef(void) {
+@@ -704,6 +747,44 @@ static bool rw_t4t_write_cc(void) {
    return true;
  }
  
 +#if (NXP_EXTNS == TRUE)
++/*******************************************************************************
++**
++** Function         rw_t3bt_get_pupi
++**
++** Description      get the PUPI of T3BT tag
++**
++** Returns          TRUE if success
++**
++*******************************************************************************/
 +static bool rw_t3bt_get_pupi(void) {
 +  NFC_HDR* p_c_apdu;
 +  uint8_t* p;
@@ -4694,8 +4774,16 @@ index e5d3ef21c..ce1c541aa 100644
 +
  /*******************************************************************************
  **
+ ** Function         rw_t4t_write_ndef
+@@ -752,6 +833,7 @@ static bool rw_t4t_write_ndef(void) {
+   return true;
+ }
+ 
++
+ /*******************************************************************************
+ **
  ** Function         rw_t4t_select_file
-@@ -1336,7 +1403,12 @@ static void rw_t4t_handle_error(tNFC_STATUS status, uint8_t sw1, uint8_t sw2) {
+@@ -1336,7 +1418,12 @@ static void rw_t4t_handle_error(tNFC_STATUS status, uint8_t sw1, uint8_t sw2) {
          event = RW_T4T_NDEF_FORMAT_CPLT_EVT;
          rw_data.status = NFC_STATUS_FAILED;
          break;
@@ -4709,7 +4797,7 @@ index e5d3ef21c..ce1c541aa 100644
        default:
          event = RW_T4T_MAX_EVT;
          break;
-@@ -1532,6 +1604,61 @@ static void rw_t4t_sm_ndef_format(NFC_HDR* p_r_apdu) {
+@@ -1532,6 +1619,61 @@ static void rw_t4t_sm_ndef_format(NFC_HDR* p_r_apdu) {
    }
  }
  
@@ -4771,7 +4859,7 @@ index e5d3ef21c..ce1c541aa 100644
  /*******************************************************************************
  **
  ** Function         rw_t4t_sm_detect_ndef
-@@ -2331,6 +2458,12 @@ static void rw_t4t_data_cback(__attribute__((unused)) uint8_t conn_id,
+@@ -2331,6 +2473,12 @@ static void rw_t4t_data_cback(__attribute__((unused)) uint8_t conn_id,
        rw_t4t_sm_ndef_format(p_r_apdu);
        GKI_freebuf(p_r_apdu);
        break;
@@ -4784,7 +4872,7 @@ index e5d3ef21c..ce1c541aa 100644
      default:
        LOG(ERROR) << StringPrintf("%s - invalid state=%d", __func__,
                                   p_t4t->state);
-@@ -2346,6 +2479,256 @@ static void rw_t4t_data_cback(__attribute__((unused)) uint8_t conn_id,
+@@ -2346,6 +2494,256 @@ static void rw_t4t_data_cback(__attribute__((unused)) uint8_t conn_id,
    }
  }
  
@@ -5041,7 +5129,7 @@ index e5d3ef21c..ce1c541aa 100644
  /*******************************************************************************
  **
  ** Function         RW_T4tFormatNDef
-@@ -2674,6 +3057,39 @@ tNFC_STATUS RW_T4tSetNDefReadOnly(void) {
+@@ -2674,6 +3072,39 @@ tNFC_STATUS RW_T4tSetNDefReadOnly(void) {
    return (retval);
  }
  
